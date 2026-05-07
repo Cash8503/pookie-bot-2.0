@@ -1,0 +1,13 @@
+{
+  "host": "192.168.10.126",
+  "sync_port": 7789,
+  "port": 2223,
+  "username": "Cash8503",
+  "ssh_key_path": null,
+  "password": "C390107224",
+  "remote_root": "/__VDS__PookieBot01/python-app-runner",
+  "db_path": "data/data.db",
+  "db_poll_interval": 30,
+  "exclude_dirs": ["venv", ".venv", "env", "__pycache__", ".git", "sync", "old cogs archive"],
+  "exclude_files": [".env", ".DS_Store"]
+}

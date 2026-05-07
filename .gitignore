@@ -1,0 +1,5 @@
+.env
+/.claude
+/.vscode
+*.md
+venv
