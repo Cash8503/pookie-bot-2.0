@@ -22,6 +22,7 @@ LEGACY_MODE:
                     shows directly in the status bar without needing a profile click.
 """
 
+import datetime
 import logging
 import os
 import random
@@ -160,8 +161,10 @@ class StatusCog(commands.Cog, name="Status"):
     #  Weekly AI refresh — rewrites statuses.txt with fresh messages
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(hours=168)  # once per week
+    @tasks.loop(time=datetime.time(hour=23, minute=59, tzinfo=datetime.timezone.utc))
     async def _weekly_refresh(self):
+        if datetime.datetime.now(datetime.timezone.utc).weekday() != 6:  # 0=Mon … 6=Sun
+            return
         try:
             current = _STATUSES_FILE.read_text(encoding="utf-8")
         except Exception:

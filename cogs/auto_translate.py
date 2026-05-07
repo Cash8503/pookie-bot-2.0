@@ -111,6 +111,7 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
             "If the message below is already in English, reply with exactly: ENGLISH\n"
             "If it is in any other language, reply with ONLY the English translation — "
             "no explanation, no prefix, just the translated text.\n\n"
+            "franch is not a typo, its a nickname"
             f"Message: {cleaned}"
         )
         try:

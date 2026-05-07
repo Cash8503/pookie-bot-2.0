@@ -16,6 +16,7 @@ Requirements (install in bot venv):
 """
 
 import asyncio
+import base64
 import io
 import logging
 import os
@@ -54,6 +55,26 @@ _NAME_RE     = re.compile(r"[^a-zA-Z0-9 _\-]")
 def _sanitize_name(name: str) -> str:
     name = _NAME_RE.sub("", name).strip()[:30]
     return name if len(name) >= 2 else "sticker"
+
+
+def _make_thumb(raw: bytes, size: int = 512) -> bytes:
+    """Shrink image to at most size×size JPEG for cheap Claude vision calls."""
+    img = _Image.open(io.BytesIO(raw)).convert("RGB")
+    img.thumbnail((size, size), _Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=85)
+    out.seek(0)
+    return out.read()
+
+
+def _media_type(raw: bytes) -> str:
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
 
 
 def _subject_crop(raw: bytes) -> "_Image.Image":
@@ -195,26 +216,44 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
 
     # ── Name generation ────────────────────────────────────────────────────────
 
-    async def _generate_name(self, sender: str) -> str:
-        """Ask Claude for a short, punchy sticker name based on the sender's name."""
+    async def _generate_name(self, sender: str, raw: bytes) -> str:
+        """Ask Claude (with vision) for a sticker name based on sender + image subject."""
         if not self.ai:
             return _sanitize_name(sender)
         try:
-            resp = await asyncio.wait_for(
+            loop  = asyncio.get_running_loop()
+            thumb = await loop.run_in_executor(None, _make_thumb, raw)
+            resp  = await asyncio.wait_for(
                 self.ai.messages.create(
                     model=MODEL,
                     max_tokens=20,
                     messages=[{
                         "role": "user",
-                        "content": (
-                            f"Make a funny Discord sticker name for someone called '{sender}'. "
-                            "Keep it short (under 25 chars), lowercase, playful — like 'maddie shocked' "
-                            "or 'jake lmao' or 'zach vibing'. "
-                            "Only letters, numbers, spaces. Reply with ONLY the name."
-                        ),
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": base64.standard_b64encode(thumb).decode(),
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Make a funny Discord sticker name. "
+                                    f"The sender is called '{sender}'. "
+                                    "Look at the image — describe what the subject is doing or expressing "
+                                    "in 1-2 words, then pair it with the sender's name. "
+                                    "Keep it under 25 chars, lowercase, playful — like 'maddie shocked', "
+                                    "'zach lmao', 'cat judging you', 'jake asleep'. "
+                                    "Only letters, numbers, spaces. Reply with ONLY the name."
+                                ),
+                            },
+                        ],
                     }],
                 ),
-                timeout=10,
+                timeout=15,
             )
             text = getattr(resp.content[0], "text", "") or ""
             return _sanitize_name(text.strip())
@@ -252,8 +291,6 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
                 return
             img_url, sender = result
 
-            sticker_name = _sanitize_name(name) if name.strip() else await self._generate_name(sender)
-
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=20)) as r:
@@ -261,6 +298,8 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
             except Exception as e:
                 await ctx.send(f"❌ Failed to download image: {e}")
                 return
+
+            sticker_name = _sanitize_name(name) if name.strip() else await self._generate_name(sender, raw)
 
             try:
                 loop      = asyncio.get_running_loop()
@@ -282,7 +321,7 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
                     reason=f"!sticker by {ctx.author} ({ctx.author.id})",
                 )
                 method = "subject zoom" if _CV2 else "center crop"
-                await ctx.send(f"✅ Sticker **{sticker.name}** created! ({method})")
+                await ctx.send(f"✅ **{sticker.name}** ({method})", stickers=[sticker])
             except discord.Forbidden:
                 await ctx.send("❌ I don't have permission to create stickers here.")
             except discord.HTTPException as e:
