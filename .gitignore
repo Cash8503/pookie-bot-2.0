@@ -1,5 +1,24 @@
+# Secrets & local config
 .env
-/.claude
-/.vscode
+sync/sync_config.json
+
+# Editor
+.claude/
+.vscode/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Database & backups
+data/data.db
+data/data.db-wal
+data/data.db-shm
+data/data.db-journal
+data/*.bak*
+
+# Docs
 *.md
-venv
+!README.md
