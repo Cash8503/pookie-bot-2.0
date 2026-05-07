@@ -26,9 +26,20 @@ from discord.ext import commands
 
 log = logging.getLogger(__name__)
 
-SESSION_TTL = 300   # seconds of inactivity before a live embed session expires
-MAX_LINES   = 10    # max entries in the live embed before old ones roll off
-MIN_LEN     = 6     # ignore messages shorter than this (after stripping noise)
+SESSION_TTL  = 300   # seconds of inactivity before a live embed session expires
+MAX_LINES    = 10    # max entries in the live embed before old ones roll off
+MIN_LEN      = 6     # ignore messages shorter than this (after stripping noise)
+MIN_WORDS    = 2     # need at least this many words to trust language detection
+MIN_CONF     = 0.75  # Google Translate confidence threshold (0–1)
+
+# Only translate from languages people actually speak — blocks obscure detections
+# that fire on abbreviations, slang, or short English words.
+_ALLOWED_LANGS = {
+    "af", "ar", "bg", "bn", "ca", "zh-CN", "zh-TW", "zh", "hr", "cs", "da",
+    "nl", "fi", "fr", "de", "el", "gu", "he", "hi", "hu", "id", "it", "ja",
+    "ko", "lt", "lv", "ml", "mr", "ms", "no", "pl", "pt", "ro", "ru", "sk",
+    "sl", "es", "sv", "sw", "ta", "te", "th", "tl", "tr", "uk", "ur", "vi",
+}
 
 _STRIP_RE = re.compile(
     r"<[^>]+>"          # Discord mentions / channel refs
@@ -116,6 +127,8 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         cleaned = _STRIP_RE.sub("", text).strip()
         if not cleaned:
             return None
+        if len(cleaned.split()) < MIN_WORDS:
+            return None
 
         params = {"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": cleaned}
         try:
@@ -130,8 +143,18 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
                         return None
                     data = await r.json(content_type=None)
 
-            src_lang    = data[2] if len(data) > 2 and isinstance(data[2], str) else "unknown"
+            src_lang = data[2] if len(data) > 2 and isinstance(data[2], str) else "unknown"
             if src_lang == "en":
+                return None
+            if src_lang not in _ALLOWED_LANGS:
+                return None
+
+            # Check detection confidence (available at data[8][0][2][0])
+            try:
+                confidence = float(data[8][0][2][0])
+            except (IndexError, TypeError, ValueError):
+                confidence = 1.0
+            if confidence < MIN_CONF:
                 return None
 
             translation = "".join(seg[0] for seg in data[0] if seg and seg[0])
