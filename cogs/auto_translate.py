@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -127,6 +128,16 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
     def _clean(content: str) -> str:
         return _STRIP_RE.sub("", content).strip()
 
+    @staticmethod
+    def _same_visible_text(source: str, translation: str) -> bool:
+        def comparable(value: str) -> str:
+            value = _STRIP_RE.sub("", value).strip()
+            value = unicodedata.normalize("NFKC", value)
+            value = re.sub(r"\s+", " ", value)
+            return value.casefold()
+
+        return comparable(source) == comparable(translation)
+
     # ── Translation backends ───────────────────────────────────────────────────
 
     async def _translate_google(self, text: str, target_lang: str) -> tuple[str, str] | None:
@@ -234,6 +245,8 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         if result is None:
             return None
         translation, src_lang = result
+        if self._same_visible_text(text, translation):
+            return None
         return (translation, src_lang, label)
 
     # ── Message listener ───────────────────────────────────────────────────────
