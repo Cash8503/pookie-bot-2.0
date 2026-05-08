@@ -36,6 +36,7 @@ class ConfigCog(commands.Cog, name="Config"):
             "Subcommands:\n"
             "  ranktracker <#channel|off>  — Set/disable rank tracker channel\n"
             "  quotebook <#channel|off>    — Set/disable the quotebook channel\n"
+            "  translate mode <live|individual> — Set auto-translate mode\n"
             "  linkclean toggle            — Toggle link cleaner on/off\n"
             "  linkclean ignore            — Mute/unmute link cleaner in current channel\n"
             "  linkclean status            — Show link cleaner state\n"
@@ -133,6 +134,44 @@ class ConfigCog(commands.Cog, name="Config"):
             f"✅ Quotes will be posted in {channel.mention}.",
             ephemeral=True,
         )
+
+    # ------------------------------------------------------------------ #
+    #  Auto-translate sub-group
+    # ------------------------------------------------------------------ #
+
+    @config.group(
+        name="translate",
+        invoke_without_command=True,
+        case_insensitive=True,
+        brief="Manage auto-translate settings",
+    )
+    @commands.has_permissions(manage_guild=True)
+    async def config_translate(self, ctx: commands.Context):
+        mode = self.bot.settings.get(ctx.guild.id, "auto_translate", "mode", "live")
+        await ctx.send(
+            f"🌐 Auto-translate mode: **{mode}**\n"
+            "`!config translate mode live` — one shared embed that updates in place\n"
+            "`!config translate mode individual` — reply to each foreign message separately",
+            ephemeral=True,
+        )
+
+    @config_translate.command(
+        name="mode",
+        brief="Set auto-translate mode to live or individual",
+        help=(
+            "Set the server's auto-translate behavior.\n\n"
+            "Use `live` for one shared updating embed per channel, or `individual` to reply to each foreign message."
+        ),
+    )
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.describe(mode="live or individual")
+    async def config_translate_mode(self, ctx: commands.Context, mode: str):
+        mode = mode.lower().strip()
+        if mode not in ("live", "individual"):
+            await ctx.send("❌ Valid modes: `live`, `individual`", ephemeral=True)
+            return
+        await self.bot.settings.set(ctx.guild.id, "auto_translate", "mode", mode)
+        await ctx.send(f"✅ Auto-translate mode set to **{mode}**.", ephemeral=True)
 
     # ------------------------------------------------------------------ #
     #  Link cleaner sub-group

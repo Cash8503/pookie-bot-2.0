@@ -102,7 +102,6 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         self.bot      = bot
         self._sessions: dict[int, _Session] = {}  # channel_id → live session
         self._lock    = asyncio.Lock()
-        self._modes:  dict[int, str] = {}          # guild_id → "live" | "individual"
 
     def cog_load(self):
         log.info("Cog Loaded.")
@@ -111,7 +110,7 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         log.info("Cog Unloaded.")
 
     def _mode(self, guild_id: int) -> str:
-        return self._modes.get(guild_id, "live")
+        return self.bot.settings.get(guild_id, "auto_translate", "mode", "live")
 
     @staticmethod
     def _has_real_text(content: str) -> bool:
@@ -243,10 +242,16 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         if mode not in ("live", "individual"):
             await ctx.send("❌ Valid modes: `live`, `individual`")
             return
-        self._modes[ctx.guild.id] = mode
-        # Clear any stale live sessions when switching modes
+        await self.bot.settings.set(ctx.guild.id, "auto_translate", "mode", mode)
+        # Clear any stale live sessions for this guild when switching to reply mode.
         if mode == "individual":
-            self._sessions.pop(ctx.channel.id, None)
+            stale = []
+            for channel_id in list(self._sessions.keys()):
+                channel = self.bot.get_channel(channel_id)
+                if channel is not None and getattr(channel, "guild", None) is ctx.guild:
+                    stale.append(channel_id)
+            for channel_id in stale:
+                self._sessions.pop(channel_id, None)
         await ctx.send(f"✅ Translation mode set to **{mode}**.")
 
     @set_mode.error

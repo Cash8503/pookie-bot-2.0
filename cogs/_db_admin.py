@@ -58,9 +58,10 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @commands.group(
+    @commands.hybrid_group(
         name="db",
         invoke_without_command=True,
+        case_insensitive=True,
         brief="Database admin commands (owner only)",
         help=(
             "Owner-only commands for inspecting and editing the bot's settings.\n\n"

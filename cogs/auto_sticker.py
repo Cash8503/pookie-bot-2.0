@@ -263,7 +263,7 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
 
     # ── Command ────────────────────────────────────────────────────────────────
 
-    @commands.command(
+    @commands.hybrid_command(
         name="sticker",
         brief="Create a guild sticker from an image",
         help=(
