@@ -9,13 +9,28 @@ from discord.ext import commands
 log = logging.getLogger(__name__)
 
 
-def get_cog_files():
-    cogs_path = Path(__file__).parent
-    return {
-        f"cogs.{file.stem}": file
-        for file in cogs_path.glob("*.py")
-        if not file.name.startswith("_")
-    }
+def _cogs_path() -> Path:
+    return Path(__file__).parent
+
+
+def _resolve_cog_name(cog: str) -> str:
+    """Strip .py extension and leading _ so callers can pass any variant."""
+    return cog.removesuffix(".py").lstrip("_")
+
+
+def get_all_cog_files() -> dict[str, tuple[Path, bool]]:
+    """Return {logical_name: (path, enabled)} for every cog file.
+
+    enabled=True  → file has no leading _ (loads on startup)
+    enabled=False → file has a leading _ (skipped on startup)
+    """
+    result: dict[str, tuple[Path, bool]] = {}
+    for file in _cogs_path().glob("*.py"):
+        if file.stem.startswith("_"):
+            result[file.stem[1:]] = (file, False)
+        else:
+            result[file.stem] = (file, True)
+    return result
 
 
 class Admin(commands.Cog, name="Admin"):
@@ -44,32 +59,142 @@ class Admin(commands.Cog, name="Admin"):
         brief="Bot owner admin commands",
         help=(
             "Owner-only commands for managing the bot at runtime.\n\n"
-            "Subcommands:\n"
-            "  reload <cog>  — Reload a specific cog by name\n"
-            "  reloadall     — Reload every loaded extension\n"
-            "  load <cog>    — Load a cog that isn't currently loaded\n"
-            "  unload <cog>  — Unload a currently loaded cog\n"
-            "  list          — List all cog files and their load status\n"
+            "Startup behavior (persists across restarts):\n"
+            "  enable <cog>  — Mark cog to load on startup (removes _ prefix)\n"
+            "  disable <cog> — Mark cog to skip on startup (adds _ prefix)\n\n"
+            "Runtime control (temporary, no file changes):\n"
+            "  start <cog>   — Load a cog right now\n"
+            "  stop <cog>    — Unload a cog right now\n"
+            "  reload <cog>  — Reload a specific cog\n"
+            "  reloadall     — Reload every loaded extension\n\n"
+            "Other:\n"
+            "  list          — List all cogs, enabled/disabled, running/stopped\n"
             "  restart       — Restart the bot process\n\n"
-            "Cog names can be given with or without the .py extension.\n"
             "All commands are restricted to the bot owner."
         ),
     )
     async def admin(self, ctx: commands.Context):
         await ctx.send(
             "**Admin Commands** (owner only)\n"
+            "**Startup behavior**\n"
+            "`!admin enable <cog>`  — Mark cog to load on startup\n"
+            "`!admin disable <cog>` — Mark cog to skip on startup\n"
+            "**Runtime control**\n"
+            "`!admin start <cog>`   — Load a cog now\n"
+            "`!admin stop <cog>`    — Unload a cog now\n"
             "`!admin reload <cog>`  — Reload a cog\n"
             "`!admin reloadall`     — Reload all cogs\n"
-            "`!admin load <cog>`    — Load a cog\n"
-            "`!admin unload <cog>`  — Unload a cog\n"
+            "**Other**\n"
             "`!admin list`          — List all cogs and status\n"
             "`!admin restart`       — Restart the bot process\n\n"
             "Run `!help admin <subcommand>` for full details."
         )
 
     # ------------------------------------------------------------------ #
-    #  Subcommands
+    #  Startup behavior — enable / disable
     # ------------------------------------------------------------------ #
+
+    @admin.command(
+        name="enable",
+        brief="Mark a cog to load on startup",
+        help=(
+            "Removes the leading _ from the cog's filename so it will be loaded "
+            "automatically on the next bot startup.\n\n"
+            "Does not start the cog immediately — use `!admin start <cog>` for that.\n\n"
+            "Example:\n"
+            "  !admin enable ow_picker"
+        ),
+    )
+    async def enable_cog(self, ctx: commands.Context, cog: str):
+        name = _resolve_cog_name(cog)
+        all_files = get_all_cog_files()
+
+        if name not in all_files:
+            await ctx.send(f"❌ No cog named `{name}` found.")
+            return
+
+        path, enabled = all_files[name]
+        if enabled:
+            await ctx.send(f"ℹ️ `{name}` is already enabled.")
+            return
+
+        new_path = path.parent / f"{name}.py"
+        path.rename(new_path)
+        await ctx.send(f"✅ Enabled `{name}` — it will load on next startup.")
+        log.info("Enabled cog %s (requested by %s)", name, ctx.author)
+
+    @admin.command(
+        name="disable",
+        brief="Mark a cog to skip on startup",
+        help=(
+            "Adds a leading _ to the cog's filename so it will be skipped "
+            "automatically on the next bot startup.\n\n"
+            "Does not stop the cog immediately — use `!admin stop <cog>` for that.\n\n"
+            "Example:\n"
+            "  !admin disable ow_picker"
+        ),
+    )
+    async def disable_cog(self, ctx: commands.Context, cog: str):
+        name = _resolve_cog_name(cog)
+        all_files = get_all_cog_files()
+
+        if name not in all_files:
+            await ctx.send(f"❌ No cog named `{name}` found.")
+            return
+
+        path, enabled = all_files[name]
+        if not enabled:
+            await ctx.send(f"ℹ️ `{name}` is already disabled.")
+            return
+
+        new_path = path.parent / f"_{name}.py"
+        path.rename(new_path)
+        await ctx.send(f"✅ Disabled `{name}` — it will be skipped on next startup.")
+        log.info("Disabled cog %s (requested by %s)", name, ctx.author)
+
+    # ------------------------------------------------------------------ #
+    #  Runtime control — start / stop / reload
+    # ------------------------------------------------------------------ #
+
+    @admin.command(
+        name="start",
+        brief="Load a cog now (temporary)",
+        help=(
+            "Loads a cog into the running bot without changing its startup behavior.\n\n"
+            "To also make it load on restart, use `!admin enable <cog>` first.\n\n"
+            "Example:\n"
+            "  !admin start ow_picker"
+        ),
+    )
+    async def start_cog(self, ctx: commands.Context, cog: str):
+        name = _resolve_cog_name(cog)
+        ext = f"cogs.{name}"
+        try:
+            await self.bot.load_extension(ext)
+            await ctx.send(f"✅ Started `{name}`.")
+            log.info("Started %s (requested by %s)", ext, ctx.author)
+        except Exception as e:
+            await ctx.send(f"❌ Failed to start `{name}`: `{e}`")
+
+    @admin.command(
+        name="stop",
+        brief="Unload a cog now (temporary)",
+        help=(
+            "Unloads a cog from the running bot without changing its startup behavior.\n\n"
+            "To also prevent it from loading on restart, use `!admin disable <cog>`.\n\n"
+            "Example:\n"
+            "  !admin stop ow_picker"
+        ),
+    )
+    async def stop_cog(self, ctx: commands.Context, cog: str):
+        name = _resolve_cog_name(cog)
+        ext = f"cogs.{name}"
+        try:
+            await self.bot.unload_extension(ext)
+            await ctx.send(f"✅ Stopped `{name}`.")
+            log.info("Stopped %s (requested by %s)", ext, ctx.author)
+        except Exception as e:
+            await ctx.send(f"❌ Failed to stop `{name}`: `{e}`")
 
     @admin.command(
         name="reload",
@@ -77,31 +202,31 @@ class Admin(commands.Cog, name="Admin"):
         help=(
             "Reloads a cog by name. If the cog isn't currently loaded, "
             "attempts to load it instead.\n\n"
-            "The .py extension is optional:\n"
-            "  !admin reload link_cleaner\n"
-            "  !admin reload link_cleaner.py  (same thing)"
+            "Example:\n"
+            "  !admin reload link_cleaner"
         ),
     )
     async def reload_cog(self, ctx: commands.Context, cog: str):
-        ext = f"cogs.{cog.removesuffix('.py')}"
+        name = _resolve_cog_name(cog)
+        ext = f"cogs.{name}"
         try:
             await self.bot.reload_extension(ext)
-            await ctx.send(f"✅ Reloaded `{ext}`")
+            await ctx.send(f"✅ Reloaded `{name}`.")
             log.info("Reloaded %s (requested by %s)", ext, ctx.author)
         except commands.ExtensionNotLoaded:
-            await ctx.send(f"⚠️ `{ext}` wasn't loaded — trying to load it instead...")
+            await ctx.send(f"⚠️ `{name}` wasn't running — starting it instead...")
             try:
                 await self.bot.load_extension(ext)
-                await ctx.send(f"✅ Loaded `{ext}`")
-                log.info("Loaded %s (requested by %s)", ext, ctx.author)
+                await ctx.send(f"✅ Started `{name}`.")
+                log.info("Started %s (requested by %s)", ext, ctx.author)
             except Exception as e:
-                await ctx.send(f"❌ Failed to load `{ext}`: `{e}`")
+                await ctx.send(f"❌ Failed to start `{name}`: `{e}`")
         except Exception as e:
-            await ctx.send(f"❌ Failed to reload `{ext}`: `{e}`")
+            await ctx.send(f"❌ Failed to reload `{name}`: `{e}`")
 
     @admin.command(
         name="reloadall",
-        brief="Reload all loaded cogs",
+        brief="Reload all running cogs",
         help=(
             "Reloads every currently loaded extension in one go.\n\n"
             "Reports the result for each cog — ✅ for success, ❌ for failure "
@@ -120,59 +245,32 @@ class Admin(commands.Cog, name="Admin"):
         await ctx.send("\n".join(results[:25]))
 
     @admin.command(
-        name="load",
-        brief="Load a cog",
-        help=(
-            "Loads a cog that exists on disk but isn't currently loaded.\n\n"
-            "The .py extension is optional:\n"
-            "  !admin load ow_picker\n"
-            "  !admin load ow_picker.py  (same thing)"
-        ),
-    )
-    async def load_cog(self, ctx: commands.Context, cog: str):
-        ext = f"cogs.{cog.removesuffix('.py')}"
-        try:
-            await self.bot.load_extension(ext)
-            await ctx.send(f"✅ Loaded `{ext}`")
-            log.info("Loaded %s (requested by %s)", ext, ctx.author)
-        except Exception as e:
-            await ctx.send(f"❌ Failed to load `{ext}`: `{e}`")
-
-    @admin.command(
-        name="unload",
-        brief="Unload a cog",
-        help=(
-            "Unloads a currently loaded cog without restarting the bot. "
-            "The cog's commands and listeners are removed immediately.\n\n"
-            "Use `!admin load <cog>` to bring it back without restarting."
-        ),
-    )
-    async def unload_cog(self, ctx: commands.Context, cog: str):
-        ext = f"cogs.{cog.removesuffix('.py')}"
-        try:
-            await self.bot.unload_extension(ext)
-            await ctx.send(f"✅ Unloaded `{ext}`")
-            log.info("Unloaded %s (requested by %s)", ext, ctx.author)
-        except Exception as e:
-            await ctx.send(f"❌ Failed to unload `{ext}`: `{e}`")
-
-    @admin.command(
         name="list",
-        brief="List all cogs and their load status",
+        brief="List all cogs, their enabled state, and running state",
         help=(
-            "Lists every .py file in the cogs folder and shows whether "
-            "each one is currently loaded (✅) or not (❌).\n\n"
-            "Handy for spotting cogs that failed to load on startup."
+            "Lists every cog file and shows two status flags:\n"
+            "  ▶️  running now   |  ⏹  stopped\n"
+            "  ✅  enabled (loads on startup)  |  🚫  disabled\n\n"
+            "Example output:\n"
+            "  ▶️ ✅ link_cleaner\n"
+            "  ⏹ 🚫 ow_picker"
         ),
     )
     async def list_cogs(self, ctx: commands.Context):
         log.info("Listing cogs (requested by %s)", ctx.author)
-        files = get_cog_files()
-        results = [
-            f"✅ `{ext}`" if ext in self.bot.extensions else f"❌ `{ext}` — not loaded"
-            for ext in files.keys()
-        ]
-        await ctx.send("\n".join(results[:25]) or "No cog files found.")
+        all_files = get_all_cog_files()
+        if not all_files:
+            await ctx.send("No cog files found.")
+            return
+
+        results = []
+        for name, (_, enabled) in sorted(all_files.items()):
+            running = f"cogs.{name}" in self.bot.extensions
+            run_icon = "▶️" if running else "⏹"
+            ena_icon = "✅" if enabled else "🚫"
+            results.append(f"{run_icon} {ena_icon} `{name}`")
+
+        await ctx.send("\n".join(results[:25]))
 
     @admin.command(
         name="nuke",
