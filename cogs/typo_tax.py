@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import discord
 from discord import app_commands
@@ -22,6 +22,11 @@ except ImportError:  # Keep the cog loadable until requirements are installed.
 NAMESPACE = "typo_tax"
 MAX_TAX_PER_MESSAGE = 3
 MIN_WORD_LEN = 4
+MIN_STAKE = 1
+MAX_STAKE = 5
+DEFAULT_CATEGORY = "math"
+DEFAULT_STAKE = 1
+TIME_LIMIT_SECONDS = 45
 
 _STRIP_RE = re.compile(
     r"https?://\S+"
@@ -82,6 +87,63 @@ _COMMON_TYPOS = {
     "ment": "meant",
 }
 
+CATEGORY_LABELS = {
+    "math": "Math",
+    "grammar": "Grammar",
+    "trivia": "Trivia",
+    "spelling": "Spelling",
+    "linguistics": "Linguistics",
+    "random": "Random",
+}
+
+CATEGORY_ALIASES = {
+    "maths": "math",
+    "arithmetic": "math",
+    "grammer": "grammar",
+    "language": "linguistics",
+    "linguistic": "linguistics",
+    "words": "linguistics",
+    "spell": "spelling",
+    "typos": "spelling",
+    "mixed": "random",
+    "any": "random",
+}
+
+_GRAMMAR_QUESTIONS = [
+    ("Choose the correct word: I left ___ jacket here. (A) there (B) their (C) they're", "B", ("their",)),
+    ("Choose the correct word: ___ going to regret that typo. (A) Your (B) You're", "B", ("you're", "youre")),
+    ("Choose the correct word: The bot lost ___ patience. (A) its (B) it's", "A", ("its",)),
+    ("Choose the correct word: This affects everyone, but the effect is worse for ___. (A) I (B) me", "B", ("me",)),
+    ("Choose the correct word: She writes better ___ I do. (A) then (B) than", "B", ("than",)),
+    ("Choose the correct word: Please send the invite to Cash and ___. (A) I (B) me", "B", ("me",)),
+    ("Choose the correct word: The typo tax is ___ than before. (A) worse (B) worst", "A", ("worse",)),
+    ("Choose the correct word: I have ___ fewer points now. (A) less (B) fewer", "A", ("less",)),
+]
+
+_TRIVIA_QUESTIONS = [
+    ("What planet is known as the Red Planet?", "Mars", ()),
+    ("How many sides does a hexagon have?", "6", ("six",)),
+    ("What gas do plants absorb from the air for photosynthesis?", "Carbon dioxide", ("co2", "carbon dioxide")),
+    ("What is the capital city of Canada?", "Ottawa", ()),
+    ("What is the chemical symbol for gold?", "Au", ("gold",)),
+    ("What year did the first iPhone release?", "2007", ()),
+    ("Which ocean is the largest?", "Pacific", ("pacific ocean",)),
+    ("Who wrote Frankenstein?", "Mary Shelley", ("shelley", "mary shelley")),
+]
+
+_LINGUISTICS_QUESTIONS = [
+    ("What is the term for a word that sounds like another word but has a different meaning?", "homophone", ()),
+    ("What is the plural of criterion?", "criteria", ()),
+    ("What is the past tense of bring?", "brought", ()),
+    ("What is the root word in unhappiness?", "happy", ()),
+    ("What do you call a word that imitates a sound, like buzz or hiss?", "onomatopoeia", ()),
+    ("What is the opposite of a prefix?", "suffix", ()),
+    ("What part of speech describes an action?", "verb", ()),
+    ("What part of speech modifies a noun?", "adjective", ()),
+]
+
+_SPELLING_WORDS = tuple(sorted(_COMMON_TYPOS.items()))
+
 
 @dataclass(frozen=True)
 class TypoHit:
@@ -91,9 +153,15 @@ class TypoHit:
 
 @dataclass(frozen=True)
 class RepaymentChallenge:
+    category_key: str
     category: str
+    difficulty: str
     prompt: str
-    answer: str
+    answers: tuple[str, ...]
+    display_answer: str
+    payout: int
+    risk: int
+    stake: int
 
 
 def _clean(content: str) -> str:
@@ -140,6 +208,49 @@ def _looks_like_other_language(text: str) -> bool:
     return marker_count >= 2 and marker_count / len(words) >= 0.25
 
 
+def _normalize_answer(value: str) -> str:
+    cleaned = value.strip().lower()
+    cleaned = re.sub(r"^[`\"'(\[]+|[`\"').,!?\]]+$", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _normalize_category(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.strip().lower().replace("-", "_").replace(" ", "_")
+    cleaned = CATEGORY_ALIASES.get(cleaned, cleaned)
+    if cleaned in CATEGORY_LABELS:
+        return cleaned
+    return None
+
+
+def _coerce_stake(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        stake = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(MIN_STAKE, min(MAX_STAKE, stake))
+
+
+def _difficulty_for_stake(stake: int) -> str:
+    if stake <= 1:
+        return "Easy"
+    if stake == 2:
+        return "Medium"
+    if stake <= 4:
+        return "Hard"
+    return "Expert"
+
+
+def _answer_set(answer: str, aliases: tuple[str, ...] = ()) -> tuple[str, ...]:
+    answers = {_normalize_answer(answer)}
+    answers.update(_normalize_answer(alias) for alias in aliases)
+    return tuple(sorted(answer for answer in answers if answer))
+
+
 class TypoTaxAlertView(discord.ui.View):
     def __init__(self, cog: "TypoTaxCog", user_id: int):
         super().__init__(timeout=300)
@@ -156,10 +267,12 @@ class TypoTaxAlertView(discord.ui.View):
 
 
 class RepaymentResultView(discord.ui.View):
-    def __init__(self, cog: "TypoTaxCog", user_id: int):
+    def __init__(self, cog: "TypoTaxCog", user_id: int, category_key: str | None = None, stake: int | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.category_key = category_key
+        self.stake = stake
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -169,41 +282,117 @@ class RepaymentResultView(discord.ui.View):
 
     @discord.ui.button(label="Go Again", style=discord.ButtonStyle.primary)
     async def go_again(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.start_repayment_from_interaction(interaction)
+        await self.cog.start_repayment_from_interaction(
+            interaction,
+            category_key=self.category_key,
+            stake=self.stake,
+        )
 
     @discord.ui.button(label="Change Category", style=discord.ButtonStyle.secondary)
     async def change_category(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title="Repayment Categories",
-            description="Math is the only repayment category available right now. More categories can plug into this menu later.",
+            description="Pick a category. It becomes your default and starts the next repayment challenge.",
             color=0x5865F2,
         )
-        await interaction.response.send_message(embed=embed, view=RepaymentCategoryView(self.user_id), ephemeral=True)
+        await interaction.response.send_message(
+            embed=embed,
+            view=RepaymentOptionsView(self.cog, self.user_id, mode="category", stake=self.stake),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Change Stakes", style=discord.ButtonStyle.danger)
+    async def change_stakes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="Repayment Stakes",
+            description="Higher stakes pay off more points, but missed answers can add risk back onto your balance.",
+            color=0xED4245,
+        )
+        await interaction.response.send_message(
+            embed=embed,
+            view=RepaymentOptionsView(self.cog, self.user_id, mode="stake", category_key=self.category_key),
+            ephemeral=True,
+        )
 
 
-class RepaymentCategoryView(discord.ui.View):
-    def __init__(self, user_id: int):
-        super().__init__(timeout=120)
+class CategorySelect(discord.ui.Select):
+    def __init__(self, cog: "TypoTaxCog", user_id: int, stake: int | None):
+        self.cog = cog
         self.user_id = user_id
+        self.stake = stake
+        options = [
+            discord.SelectOption(label=label, value=key, description=f"{label} repayment questions")
+            for key, label in CATEGORY_LABELS.items()
+        ]
+        super().__init__(placeholder="Choose a repayment category", min_values=1, max_values=1, options=options)
 
-    @discord.ui.select(
-        placeholder="Math selected",
-        min_values=1,
-        max_values=1,
-        options=[
-            discord.SelectOption(
-                label="Math",
-                value="math",
-                description="Simple arithmetic questions",
-                default=True,
-            )
-        ],
-    )
-    async def select_category(self, interaction: discord.Interaction, select: discord.ui.Select):
+    async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This category picker belongs to someone else.", ephemeral=True)
             return
-        await interaction.response.send_message("Math is already selected.", ephemeral=True)
+        category_key = self.values[0]
+        await self.cog._set_preferred_category(interaction.user.id, category_key)
+        await interaction.response.send_message(
+            f"Category set to **{CATEGORY_LABELS[category_key]}**. Starting a new repayment.",
+            ephemeral=True,
+        )
+        if interaction.channel is not None:
+            await self.cog.start_repayment_in_channel(
+                interaction.channel,
+                interaction.user,
+                category_key=category_key,
+                stake=self.stake,
+            )
+
+
+class StakeSelect(discord.ui.Select):
+    def __init__(self, cog: "TypoTaxCog", user_id: int, category_key: str | None):
+        self.cog = cog
+        self.user_id = user_id
+        self.category_key = category_key
+        options = [
+            discord.SelectOption(
+                label=f"{stake}x",
+                value=str(stake),
+                description=f"{_difficulty_for_stake(stake)} challenge, repays up to {stake}",
+            )
+            for stake in range(MIN_STAKE, MAX_STAKE + 1)
+        ]
+        super().__init__(placeholder="Choose repayment stakes", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This stakes picker belongs to someone else.", ephemeral=True)
+            return
+        stake = int(self.values[0])
+        await self.cog._set_preferred_stake(interaction.user.id, stake)
+        await interaction.response.send_message(f"Stakes set to **{stake}x**. Starting a new repayment.", ephemeral=True)
+        if interaction.channel is not None:
+            await self.cog.start_repayment_in_channel(
+                interaction.channel,
+                interaction.user,
+                category_key=self.category_key,
+                stake=stake,
+            )
+
+
+class RepaymentOptionsView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "TypoTaxCog",
+        user_id: int,
+        *,
+        mode: str,
+        category_key: str | None = None,
+        stake: int | None = None,
+    ):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.user_id = user_id
+        if mode == "stake":
+            self.add_item(StakeSelect(cog, user_id, category_key))
+        else:
+            self.add_item(CategorySelect(cog, user_id, stake))
 
 
 class TypoTaxCog(commands.Cog, name="TypoTax"):
@@ -242,6 +431,20 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
     async def _set_notifications(self, user_id: int, enabled: bool) -> None:
         await self.bot.settings.set_user(user_id, NAMESPACE, "notifications", enabled)
 
+    def _preferred_category(self, user_id: int) -> str:
+        raw = self.bot.settings.get_user(user_id, NAMESPACE, "category", DEFAULT_CATEGORY)
+        return _normalize_category(str(raw)) or DEFAULT_CATEGORY
+
+    async def _set_preferred_category(self, user_id: int, category_key: str) -> None:
+        await self.bot.settings.set_user(user_id, NAMESPACE, "category", category_key)
+
+    def _preferred_stake(self, user_id: int) -> int:
+        raw = self.bot.settings.get_user(user_id, NAMESPACE, "stake", DEFAULT_STAKE)
+        return _coerce_stake(raw) or DEFAULT_STAKE
+
+    async def _set_preferred_stake(self, user_id: int, stake: int) -> None:
+        await self.bot.settings.set_user(user_id, NAMESPACE, "stake", _coerce_stake(stake) or DEFAULT_STAKE)
+
     async def _add_tax(self, user_id: int, amount: int) -> int:
         balance = self._balance(user_id) + amount
         await self._set_balance(user_id, balance)
@@ -249,11 +452,22 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self.bot.settings.set_user(user_id, NAMESPACE, "total_typos", total + amount)
         return balance
 
-    async def _repay_one(self, user_id: int) -> int:
-        balance = max(0, self._balance(user_id) - 1)
+    async def _repay_amount(self, user_id: int, amount: int) -> int:
+        amount = max(1, int(amount))
+        balance = max(0, self._balance(user_id) - amount)
         await self._set_balance(user_id, balance)
         total = int(self.bot.settings.get_user(user_id, NAMESPACE, "total_repaid", 0) or 0)
-        await self.bot.settings.set_user(user_id, NAMESPACE, "total_repaid", total + 1)
+        await self.bot.settings.set_user(user_id, NAMESPACE, "total_repaid", total + amount)
+        return balance
+
+    async def _apply_repayment_penalty(self, user_id: int, amount: int) -> int:
+        amount = max(0, int(amount))
+        if amount == 0:
+            return self._balance(user_id)
+        balance = self._balance(user_id) + amount
+        await self._set_balance(user_id, balance)
+        total = int(self.bot.settings.get_user(user_id, NAMESPACE, "total_stake_penalties", 0) or 0)
+        await self.bot.settings.set_user(user_id, NAMESPACE, "total_stake_penalties", total + amount)
         return balance
 
     def _detect_typos(self, content: str) -> list[TypoHit]:
@@ -308,21 +522,167 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             color=0xFEE75C,
         )
         embed.add_field(name="Caught", value=examples, inline=False)
-        embed.set_footer(text="Use the Repay button or !typotax repay to work off one point.")
+        embed.set_footer(text="Use Repay or !typotax repay. Higher stakes repay more points at once.")
         return embed
 
-    def _make_math_challenge(self) -> RepaymentChallenge:
-        left = random.randint(2, 12)
-        right = random.randint(2, 12)
-        op = random.choice(("+", "-", "*"))
-        if op == "-":
-            left, right = max(left, right), min(left, right)
-            answer = left - right
-        elif op == "*":
-            answer = left * right
+    def _challenge_shell(
+        self,
+        *,
+        category_key: str,
+        prompt: str,
+        answer: str,
+        aliases: tuple[str, ...] = (),
+        stake: int,
+        balance: int,
+    ) -> RepaymentChallenge:
+        effective_stake = max(MIN_STAKE, min(MAX_STAKE, stake, balance))
+        return RepaymentChallenge(
+            category_key=category_key,
+            category=CATEGORY_LABELS[category_key],
+            difficulty=_difficulty_for_stake(effective_stake),
+            prompt=prompt,
+            answers=_answer_set(answer, aliases),
+            display_answer=answer,
+            payout=effective_stake,
+            risk=max(0, effective_stake - 1),
+            stake=effective_stake,
+        )
+
+    def _make_math_challenge(self, stake: int, balance: int) -> RepaymentChallenge:
+        if stake <= 1:
+            left = random.randint(2, 12)
+            right = random.randint(2, 12)
+            op = random.choice(("+", "-", "*"))
+            if op == "-":
+                left, right = max(left, right), min(left, right)
+                answer = left - right
+            elif op == "*":
+                answer = left * right
+            else:
+                answer = left + right
+            prompt = f"What is `{left} {op} {right}`?"
+        elif stake == 2:
+            left = random.randint(4, 15)
+            right = random.randint(3, 12)
+            extra = random.randint(5, 30)
+            answer = left * right + extra
+            prompt = f"What is `({left} * {right}) + {extra}`?"
+        elif stake <= 4:
+            divisor = random.randint(2, 9)
+            quotient = random.randint(7, 18)
+            extra = random.randint(12, 40)
+            answer = quotient + extra
+            prompt = f"What is `({divisor * quotient} / {divisor}) + {extra}`?"
         else:
-            answer = left + right
-        return RepaymentChallenge(category="Math", prompt=f"What is `{left} {op} {right}`?", answer=str(answer))
+            a = random.randint(3, 9)
+            b = random.randint(3, 9)
+            c = random.randint(2, 7)
+            d = random.randint(8, 30)
+            answer = (a * b) + (c * c) - d
+            prompt = f"What is `({a} * {b}) + ({c}^2) - {d}`?"
+        return self._challenge_shell(
+            category_key="math",
+            prompt=prompt,
+            answer=str(answer),
+            stake=stake,
+            balance=balance,
+        )
+
+    def _make_grammar_challenge(self, stake: int, balance: int) -> RepaymentChallenge:
+        prompt, answer, aliases = random.choice(_GRAMMAR_QUESTIONS)
+        if stake >= 4:
+            prompt += " Answer with the letter or the word."
+        return self._challenge_shell(
+            category_key="grammar",
+            prompt=prompt,
+            answer=answer,
+            aliases=aliases,
+            stake=stake,
+            balance=balance,
+        )
+
+    def _make_trivia_challenge(self, stake: int, balance: int) -> RepaymentChallenge:
+        prompt, answer, aliases = random.choice(_TRIVIA_QUESTIONS)
+        return self._challenge_shell(
+            category_key="trivia",
+            prompt=prompt,
+            answer=answer,
+            aliases=aliases,
+            stake=stake,
+            balance=balance,
+        )
+
+    def _make_spelling_challenge(self, stake: int, balance: int) -> RepaymentChallenge:
+        typo, correction = random.choice(_SPELLING_WORDS)
+        if stake >= 4:
+            prompt = f"Correct this typo: `{typo}`"
+            answer = correction
+            aliases = ()
+        else:
+            distractors = random.sample(sorted({word for word in _COMMON_TYPOS.values() if word != correction}), k=2)
+            options = [correction, *distractors]
+            random.shuffle(options)
+            letters = ("A", "B", "C")
+            rendered = " ".join(f"({letter}) {word}" for letter, word in zip(letters, options))
+            answer_index = options.index(correction)
+            answer = letters[answer_index]
+            aliases = (correction,)
+            prompt = f"Which is the correct spelling for `{typo}`? {rendered}"
+        return self._challenge_shell(
+            category_key="spelling",
+            prompt=prompt,
+            answer=answer,
+            aliases=aliases,
+            stake=stake,
+            balance=balance,
+        )
+
+    def _make_linguistics_challenge(self, stake: int, balance: int) -> RepaymentChallenge:
+        if stake <= 2:
+            word = random.choice(("repayment", "language", "syntax", "vocabulary", "correction"))
+            count = sum(1 for char in word if char in "aeiou")
+            return self._challenge_shell(
+                category_key="linguistics",
+                prompt=f"How many vowels are in `{word}`?",
+                answer=str(count),
+                aliases=(str(count),),
+                stake=stake,
+                balance=balance,
+            )
+        prompt, answer, aliases = random.choice(_LINGUISTICS_QUESTIONS)
+        return self._challenge_shell(
+            category_key="linguistics",
+            prompt=prompt,
+            answer=answer,
+            aliases=aliases,
+            stake=stake,
+            balance=balance,
+        )
+
+    def _make_challenge(self, user_id: int, category_key: str | None, stake: int | None) -> RepaymentChallenge | None:
+        balance = self._balance(user_id)
+        if balance <= 0:
+            return None
+
+        requested_category = category_key or self._preferred_category(user_id)
+        resolved_category = requested_category
+        if resolved_category == "random":
+            resolved_category = random.choice([key for key in CATEGORY_LABELS if key != "random"])
+        resolved_stake = stake or self._preferred_stake(user_id)
+        resolved_stake = max(MIN_STAKE, min(MAX_STAKE, resolved_stake, balance))
+
+        makers = {
+            "math": self._make_math_challenge,
+            "grammar": self._make_grammar_challenge,
+            "trivia": self._make_trivia_challenge,
+            "spelling": self._make_spelling_challenge,
+            "linguistics": self._make_linguistics_challenge,
+        }
+        maker = makers.get(resolved_category, self._make_math_challenge)
+        challenge = maker(resolved_stake, balance)
+        if requested_category == "random":
+            return replace(challenge, category_key="random")
+        return challenge
 
     def _build_repayment_embed(self, user: discord.Member | discord.User, challenge: RepaymentChallenge) -> discord.Embed:
         embed = discord.Embed(
@@ -331,7 +691,11 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             color=0x5865F2,
         )
         embed.add_field(name="Category", value=challenge.category, inline=True)
-        embed.add_field(name="Time Limit", value="30 seconds", inline=True)
+        embed.add_field(name="Stake", value=f"{challenge.stake}x", inline=True)
+        embed.add_field(name="Difficulty", value=challenge.difficulty, inline=True)
+        embed.add_field(name="Pays Off", value=str(challenge.payout), inline=True)
+        embed.add_field(name="Risk", value=str(challenge.risk), inline=True)
+        embed.add_field(name="Time Limit", value=f"{TIME_LIMIT_SECONDS} seconds", inline=True)
         embed.set_footer(text="Reply in this channel with the answer.")
         return embed
 
@@ -348,7 +712,13 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         embed.set_footer(text=f"Repayment for {user.display_name}")
         return embed
 
-    async def start_repayment_from_interaction(self, interaction: discord.Interaction):
+    async def start_repayment_from_interaction(
+        self,
+        interaction: discord.Interaction,
+        *,
+        category_key: str | None = None,
+        stake: int | None = None,
+    ):
         if interaction.channel is None:
             await interaction.response.send_message("I need a channel to run a repayment challenge.", ephemeral=True)
             return
@@ -356,7 +726,10 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             await interaction.response.send_message("You do not have any typo-tax debt right now.", ephemeral=True)
             return
 
-        challenge = self._make_math_challenge()
+        challenge = self._make_challenge(interaction.user.id, category_key, stake)
+        if challenge is None:
+            await interaction.response.send_message("You do not have any typo-tax debt right now.", ephemeral=True)
+            return
         await interaction.response.send_message(embed=self._build_repayment_embed(interaction.user, challenge))
         challenge_message = await interaction.original_response()
         await self._wait_for_repayment_answer(
@@ -366,12 +739,49 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             challenge=challenge,
         )
 
-    async def start_repayment_from_context(self, ctx: commands.Context):
+    async def start_repayment_in_channel(
+        self,
+        channel: discord.abc.Messageable,
+        user: discord.Member | discord.User,
+        *,
+        category_key: str | None = None,
+        stake: int | None = None,
+    ) -> None:
+        if self._balance(user.id) <= 0:
+            await channel.send(
+                embed=self._build_result_embed(user, "No Debt", "You do not have any typo-tax debt right now.", 0x57F287, 0)
+            )
+            return
+
+        challenge = self._make_challenge(user.id, category_key, stake)
+        if challenge is None:
+            await channel.send(
+                embed=self._build_result_embed(user, "No Debt", "You do not have any typo-tax debt right now.", 0x57F287, 0)
+            )
+            return
+        challenge_message = await channel.send(embed=self._build_repayment_embed(user, challenge))
+        await self._wait_for_repayment_answer(
+            channel=channel,
+            user=user,
+            challenge_message=challenge_message,
+            challenge=challenge,
+        )
+
+    async def start_repayment_from_context(
+        self,
+        ctx: commands.Context,
+        *,
+        category_key: str | None = None,
+        stake: int | None = None,
+    ):
         if self._balance(ctx.author.id) <= 0:
             await ctx.send(embed=self._build_result_embed(ctx.author, "No Debt", "You do not have any typo-tax debt right now.", 0x57F287, 0))
             return
 
-        challenge = self._make_math_challenge()
+        challenge = self._make_challenge(ctx.author.id, category_key, stake)
+        if challenge is None:
+            await ctx.send(embed=self._build_result_embed(ctx.author, "No Debt", "You do not have any typo-tax debt right now.", 0x57F287, 0))
+            return
         challenge_message = await ctx.send(embed=self._build_repayment_embed(ctx.author, challenge))
         await self._wait_for_repayment_answer(
             channel=ctx.channel,
@@ -387,50 +797,64 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         challenge_message: discord.Message,
         challenge: RepaymentChallenge,
     ) -> None:
-        answer = challenge.answer
-
         def check(message: discord.Message) -> bool:
             return (
                 message.author.id == user.id
                 and message.channel.id == challenge_message.channel.id
-                and message.content.strip().lstrip("-").isdigit()
+                and bool(message.content.strip())
             )
 
         try:
-            reply = await self.bot.wait_for("message", check=check, timeout=30)
+            reply = await self.bot.wait_for("message", check=check, timeout=TIME_LIMIT_SECONDS)
         except asyncio.TimeoutError:
-            balance = self._balance(user.id)
+            balance = await self._apply_repayment_penalty(user.id, challenge.risk)
+            description = "Debt stays where it is." if challenge.risk == 0 else f"Debt increased by **{challenge.risk}**."
             embed = self._build_result_embed(
                 user,
                 "Time Is Up",
-                "Debt stays where it is.",
+                description,
                 0xED4245,
                 balance,
             )
-            await channel.send(embed=embed, view=RepaymentResultView(self, user.id))
+            await channel.send(
+                embed=embed,
+                view=RepaymentResultView(self, user.id, challenge.category_key, challenge.stake),
+            )
             return
 
-        if int(reply.content.strip()) != int(answer):
-            balance = self._balance(user.id)
+        if _normalize_answer(reply.content) not in challenge.answers:
+            balance = await self._apply_repayment_penalty(user.id, challenge.risk)
+            description = f"The answer was **{challenge.display_answer}**."
+            if challenge.risk:
+                description += f" Debt increased by **{challenge.risk}**."
+            else:
+                description += " Debt stays where it is."
             embed = self._build_result_embed(
                 user,
                 "Wrong Answer",
-                f"The answer was **{answer}**. Debt stays where it is.",
+                description,
                 0xED4245,
                 balance,
             )
-            await channel.send(embed=embed, view=RepaymentResultView(self, user.id))
+            await channel.send(
+                embed=embed,
+                view=RepaymentResultView(self, user.id, challenge.category_key, challenge.stake),
+            )
             return
 
-        balance = await self._repay_one(user.id)
+        balance = await self._repay_amount(user.id, challenge.payout)
+        point_word = "point" if challenge.payout == 1 else "points"
         embed = self._build_result_embed(
             user,
             "Debt Repaid",
-            "Correct. One typo-tax point has been removed.",
+            f"Correct. **{challenge.payout}** typo-tax {point_word} removed.",
             0x57F287,
             balance,
         )
-        await channel.send(embed=embed, view=RepaymentResultView(self, user.id))
+        await channel.send(
+            embed=embed,
+            view=RepaymentResultView(self, user.id, challenge.category_key, challenge.stake),
+        )
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -471,14 +895,22 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
     async def typotax(self, ctx: commands.Context):
         enabled = self._notifications_enabled(ctx.author.id)
         detector = "full English spellcheck" if self._spellchecker is not None else "common typo list only"
+        category = self._preferred_category(ctx.author.id)
+        stake = self._preferred_stake(ctx.author.id)
+        category_list = ", ".join(f"`{key}`" for key in CATEGORY_LABELS)
         await ctx.send(
             "**Typo Tax**\n"
             f"Balance: **{self._balance(ctx.author.id)}**\n"
             f"Notifications: **{'on' if enabled else 'off'}**\n"
+            f"Default category: **{CATEGORY_LABELS[category]}**\n"
+            f"Default stakes: **{stake}x**\n"
             f"Detector: **{detector}**\n\n"
             "`!typotax optin` - get notified when taxed\n"
-            "`!typotax repay` - answer math to remove 1 point\n"
-            "`!typotax balance [member]` - check a balance"
+            "`!typotax repay [category] [stake]` - answer a challenge to repay debt\n"
+            "`!typotax category [category]` - set your default repayment category\n"
+            "`!typotax stake [1-5]` - set your default stakes\n"
+            "`!typotax balance [member]` - check a balance\n\n"
+            f"Categories: {category_list}"
         )
 
     @helped_command(typotax, "typotax optin", name="optin")
@@ -524,8 +956,68 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
 
     @helped_command(typotax, "typotax repay", name="repay")
     @commands.guild_only()
-    async def repay(self, ctx: commands.Context):
-        await self.start_repayment_from_context(ctx)
+    @app_commands.describe(
+        category="math, grammar, trivia, spelling, linguistics, or random",
+        stake="1-5. Higher stakes repay more but risk more.",
+    )
+    async def repay(self, ctx: commands.Context, category: str | None = None, stake: int | None = None):
+        category_key = _normalize_category(category) if category else None
+        if category and category_key is None:
+            await ctx.send(
+                "Unknown category. Use one of: "
+                + ", ".join(f"`{key}`" for key in CATEGORY_LABELS)
+            )
+            return
+
+        resolved_stake = _coerce_stake(stake)
+        if stake is not None and resolved_stake is None:
+            await ctx.send(f"Stake must be a number from {MIN_STAKE} to {MAX_STAKE}.")
+            return
+
+        await self.start_repayment_from_context(ctx, category_key=category_key, stake=resolved_stake)
+
+    @helped_command(typotax, "typotax category", name="category")
+    @commands.guild_only()
+    @app_commands.describe(category="math, grammar, trivia, spelling, linguistics, or random")
+    async def category(self, ctx: commands.Context, category: str | None = None):
+        current = self._preferred_category(ctx.author.id)
+        if category is None:
+            await ctx.send(
+                f"Your default typo-tax category is **{CATEGORY_LABELS[current]}**.\n"
+                "Available: " + ", ".join(f"`{key}`" for key in CATEGORY_LABELS)
+            )
+            return
+
+        category_key = _normalize_category(category)
+        if category_key is None:
+            await ctx.send(
+                "Unknown category. Use one of: "
+                + ", ".join(f"`{key}`" for key in CATEGORY_LABELS)
+            )
+            return
+
+        await self._set_preferred_category(ctx.author.id, category_key)
+        await ctx.send(f"Default typo-tax category set to **{CATEGORY_LABELS[category_key]}**.")
+
+    @helped_command(typotax, "typotax stake", name="stake")
+    @commands.guild_only()
+    @app_commands.describe(stake="1-5. Higher stakes repay more but risk more.")
+    async def stake(self, ctx: commands.Context, stake: int | None = None):
+        current = self._preferred_stake(ctx.author.id)
+        if stake is None:
+            await ctx.send(f"Your default typo-tax stakes are **{current}x**.")
+            return
+
+        resolved = _coerce_stake(stake)
+        if resolved is None:
+            await ctx.send(f"Stake must be a number from {MIN_STAKE} to {MAX_STAKE}.")
+            return
+        if resolved != stake:
+            await ctx.send(f"Stake must be between {MIN_STAKE} and {MAX_STAKE}.")
+            return
+
+        await self._set_preferred_stake(ctx.author.id, resolved)
+        await ctx.send(f"Default typo-tax stakes set to **{resolved}x**.")
 
     @helped_command(typotax, "typotax forgive", name="forgive")
     @commands.guild_only()

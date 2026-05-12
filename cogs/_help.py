@@ -481,7 +481,9 @@ HELP_CONTENT: dict[str, CommandHelp] = {
             "{prefix}typotax optin",
             "{prefix}typotax optout",
             "{prefix}typotax balance [member]",
-            "{prefix}typotax repay",
+            "{prefix}typotax repay [category] [stake]",
+            "{prefix}typotax category [category]",
+            "{prefix}typotax stake [1-5]",
             "{prefix}typotax leaderboard",
             "{prefix}typotax forgive <member> [amount]",
         ),
@@ -508,9 +510,22 @@ HELP_CONTENT: dict[str, CommandHelp] = {
         usage="{prefix}typotax leaderboard",
     ),
     "typotax repay": CommandHelp(
-        brief="Repay one typo-tax point",
-        description="Starts a repayment challenge. Correct answers remove one debt point.",
-        usage="{prefix}typotax repay",
+        brief="Repay typo-tax debt",
+        description="Starts a repayment challenge. Higher stakes ask harder questions, repay more points, and risk more on misses.",
+        usage="{prefix}typotax repay [category] [stake]",
+        examples=("{prefix}typotax repay", "{prefix}typotax repay grammar 3", "{prefix}typotax repay random 5"),
+    ),
+    "typotax category": CommandHelp(
+        brief="Set repayment category",
+        description="Shows or changes your default typo-tax repayment category.",
+        usage="{prefix}typotax category [category]",
+        examples=("{prefix}typotax category", "{prefix}typotax category trivia"),
+    ),
+    "typotax stake": CommandHelp(
+        brief="Set repayment stakes",
+        description="Shows or changes your default typo-tax stakes from 1x to 5x.",
+        usage="{prefix}typotax stake [1-5]",
+        examples=("{prefix}typotax stake", "{prefix}typotax stake 3"),
     ),
     "typotax forgive": CommandHelp(
         brief="Forgive typo-tax debt",
@@ -534,6 +549,29 @@ HELP_CONTENT: dict[str, CommandHelp] = {
         brief="Show your Wordle stats",
         description="Shows your lifetime Wordle record and guess distribution.",
         usage="{prefix}wordle stats",
+    ),
+
+    "pookie": CommandHelp(
+        brief="About Pookie",
+        description=(
+            "Pookie is a locally running AI that lives in this server. "
+            "Mention her (@Pookie) in any message and she'll reply based on the recent conversation. "
+            "She reads up to the last 35 messages for context, and can see images posted in chat. "
+            "She's not a bot, she swears."
+        ),
+        usage="{prefix}pookie",
+        notes=(
+            "Use {prefix}resetcontext to clear her memory of the current channel.",
+        ),
+    ),
+
+    "resetcontext": CommandHelp(
+        brief="Clear Pookie's memory of this channel",
+        description=(
+            "Pookie is powered by a locally running AI model. She reads recent channel history as context before replying. "
+            "This command marks a cutoff point — any messages before it will be excluded from her context window going forward."
+        ),
+        usage="{prefix}resetcontext",
     ),
 }
 

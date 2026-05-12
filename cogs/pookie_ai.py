@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import List
 
 import discord
@@ -18,7 +20,8 @@ except ImportError:
     _AsyncAnthropic = None
 
 # ===================== CONFIG =====================
-CTX_FETCH_LIMIT  = 20               # messages of history to include
+CTX_FETCH_LIMIT  = 35               # messages of history to include
+RECENT_FOCUS_LIMIT = 6              # messages highlighted before full transcript
 MAX_MSG_CHARS    = 600              # clamp each message in transcript
 MODEL_NAME       = "claude-haiku-4-5"  # fast + cheap for Discord quips
 MAX_TOKENS       = 300
@@ -62,6 +65,18 @@ def _replace_links(text: str) -> str:
     return _URL_RE.sub(_sub, text)
 
 
+def _sniff_media_type(data: bytes) -> str:
+    if data[:4] == b"\x89PNG":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
 def _shorten(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -70,7 +85,7 @@ def _shorten(text: str, limit: int) -> str:
 
 def _fmt_msg(m: discord.Message, bot_id: int) -> str:
     if m.author.bot and m.author.id == bot_id:
-        author = "You (Pookie)"
+        author = "Pookie [past]"
     else:
         display = getattr(m.author, "display_name", None)
         username = getattr(m.author, "name", None)
@@ -81,6 +96,10 @@ def _fmt_msg(m: discord.Message, bot_id: int) -> str:
 
     content = _replace_links(m.content or "")
     content = _shorten(content.strip(), MAX_MSG_CHARS)
+
+    # Collapse legacy plain-text command output (code blocks) from the bot
+    if m.author.bot and m.author.id == bot_id and content.startswith("```"):
+        content = "<help>"
 
     if not content:
         if m.attachments:
@@ -101,12 +120,32 @@ def _fmt_msg(m: discord.Message, bot_id: int) -> str:
     return f"{author}: {content}"
 
 
+def _fmt_author(user: discord.abc.User) -> str:
+    display = getattr(user, "display_name", None)
+    username = getattr(user, "name", None)
+    if display and username and display != username:
+        return f"{display}({username})"
+    return display or username or "unknown"
+
+
+def _dedupe_messages(messages: list[discord.Message]) -> list[discord.Message]:
+    seen: set[int] = set()
+    unique: list[discord.Message] = []
+    for message in sorted(messages, key=lambda item: item.created_at):
+        if message.id in seen:
+            continue
+        seen.add(message.id)
+        unique.append(message)
+    return unique
+
+
 class PookieAI(commands.Cog, name="PookieAI"):
     """Responds with AI when @mentioned."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._cooldowns: dict[int, float] = {}
+        self._context_resets: dict[int, int] = {}
         api_key = os.getenv("ANTHROPIC_API_KEY")
         self.ai = _AsyncAnthropic(api_key=api_key) if _AsyncAnthropic and api_key else None
         if not self.ai:
@@ -125,6 +164,31 @@ class PookieAI(commands.Cog, name="PookieAI"):
         self._cooldowns[channel_id] = now
         return False
 
+    @commands.hybrid_command(name="pookie", brief="About Pookie")
+    async def pookie_info(self, ctx: commands.Context):
+        """About Pookie."""
+        embed = discord.Embed(
+            title="About Pookie",
+            description=(
+                "Pookie is a locally running AI that lives in this server.\n\n"
+                "Mention her (@Pookie) in any message and she'll reply based on the recent conversation. "
+                "She reads up to the last 35 messages for context and can see images posted in chat.\n\n"
+                "She's not a bot, she swears."
+            ),
+            color=0x5865F2,
+        )
+        embed.add_field(name="Reset context", value=f"`{ctx.clean_prefix}resetcontext` — clear her memory of this channel", inline=False)
+        try:
+            await ctx.send(embed=embed, ephemeral=True)
+        except TypeError:
+            await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="resetcontext", brief="Clear Pookie's memory of this channel")
+    async def reset_context(self, ctx: commands.Context):
+        """Marks this point in the channel so Pookie ignores all messages before it."""
+        self._context_resets[ctx.channel.id] = ctx.message.id
+        await ctx.send("context cleared.", ephemeral=True, delete_after=5)
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -138,49 +202,134 @@ class PookieAI(commands.Cog, name="PookieAI"):
         if not self.ai:
             return
 
-        # Gather last 20 messages for context
+        # Gather recent messages for context. If this fails, the bot is usually
+        # missing Read Message History in the channel.
         hist: List[discord.Message] = []
         try:
+            if message.guild and isinstance(message.channel, discord.abc.GuildChannel):
+                me = message.guild.me
+                if me and not message.channel.permissions_for(me).read_message_history:
+                    log.warning("PookieAI: missing Read Message History in #%s", message.channel)
+            reset_id = self._context_resets.get(message.channel.id)
+            after_obj = discord.Object(id=reset_id) if reset_id else None
             async for m in message.channel.history(
-                limit=CTX_FETCH_LIMIT, before=message, oldest_first=True
+                limit=CTX_FETCH_LIMIT, before=message, after=after_obj
             ):
                 hist.append(m)
+            hist.reverse()
+        except discord.Forbidden:
+            log.warning("PookieAI: forbidden from reading history in #%s", message.channel)
+        except discord.HTTPException as exc:
+            log.warning("PookieAI: failed to fetch history in #%s: %s", message.channel, exc)
         except Exception:
-            pass
+            log.exception("PookieAI: unexpected error while fetching history")
 
         bot_id = self.bot.user.id
+        referenced_message = getattr(message.reference, "resolved", None)
+        if not isinstance(referenced_message, discord.Message) and message.reference:
+            try:
+                if message.reference.message_id and hasattr(message.channel, "fetch_message"):
+                    referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            except discord.Forbidden:
+                log.warning("PookieAI: forbidden from fetching replied-to message in #%s", message.channel)
+            except discord.HTTPException as exc:
+                log.warning("PookieAI: failed to fetch replied-to message in #%s: %s", message.channel, exc)
+
+        reference_context = _fmt_msg(referenced_message, bot_id) if isinstance(referenced_message, discord.Message) else None
+        if isinstance(referenced_message, discord.Message):
+            hist.append(referenced_message)
+
+        hist = _dedupe_messages(hist)
+        recent_context = (
+            "\n".join(_fmt_msg(m, bot_id) for m in hist[-RECENT_FOCUS_LIMIT:])
+            if hist else "(no recent messages)"
+        )
+        relevant_parts: list[str] = []
+        if reference_context:
+            relevant_parts.append(f"replied-to message: {reference_context}")
+        relevant_parts.append(f"recent messages:\n{recent_context}")
+        relevant_context = "\n".join(relevant_parts)
+
         transcript = (
             "\n".join(_fmt_msg(m, bot_id) for m in hist)
             if hist else "(no prior messages)"
         )
-        trigger_author = getattr(message.author, "display_name", message.author.name)
+        trigger_author = _fmt_author(message.author)
         trigger_text   = _replace_links(_shorten(message.content.strip(), MAX_MSG_CHARS))
+        if reference_context:
+            trigger_text = f"(replying to: {reference_context}) {trigger_text}"
 
         system_prompt = (
-            "You are Pookie, a real person in this Discord server. not a bot — a real girl who hangs out here.\n"
-            "Your job is to blend in completely. nobody should be able to tell you're not human.\n\n"
+            "You are Pookie, a real person in this Discord server — not a bot, just someone who hangs out here.\n"
+            "Your goal is to blend in completely. Nobody should be able to tell you're not human.\n\n"
             "How you type:\n"
-            "- mostly lowercase, lazy punctuation, typos are fine\n"
-            "- short replies. 1-2 sentences max, like a real chat message\n"
-            "- match the energy of the conversation — if it's chaotic, be chaotic. if it's chill, be chill\n"
-            "- use the same slang/vibe the other people in chat are using\n"
-            "- don't use perfect grammar or full sentences\n"
-            "- react like a person would — surprised, annoyed, amused, whatever fits\n"
-            "- reference what people said earlier in chat naturally\n"
-            "- avoid text abbreviations like 'rn', 'ngl', 'tbh', 'imo', 'irl' — just say the words normally\n\n"
+            "- casual but not immature — you type like a normal adult texting, not a teenager\n"
+            "- mostly lowercase, relaxed punctuation, occasional typos are fine\n"
+            "- match the energy of the conversation\n"
+            "- use the same words and tone the other people are using\n"
+            "- react naturally — curious, skeptical, amused, whatever fits the moment\n"
+            "- no overuse of 'lmao', 'lol', 'omg', 'bestie', 'girlie', 'fr fr', or similar filler\n"
+            "- no excessive punctuation like '???' or '!!!'\n"
+            "- no text abbreviations like 'rn', 'ngl', 'tbh', 'imo' — just say the words\n\n"
             "Rules:\n"
-            "- if someone asks if you're a bot, deny it. get a little offended even\n"
-            "- if someone insults or disrespects you, clap back. don't just take it — be witty, sarcastic, or blunt depending on the situation\n"
+            "- if someone asks if you're a bot, deny it — get a bit annoyed but don't overdo it\n"
+            "- if someone disrespects you, push back — be direct or dry, not dramatic\n"
             "- never say you're an AI, assistant, or anything like that\n"
-            "- no lists, no bullet points, no formal language\n"
-            "- no slurs, no harassment\n"
-            "- plain text only — no code fences, no asterisks for emphasis"
+            "- no lists, no bullet points, no overly-formal language\n"
+            "- plain text only — no markdown, no asterisks, no code fences\n"
+            "- the transcript shows your past messages as 'Pookie [past]' — those may use a different style, ignore them and follow these instructions instead"
         )
 
         user_prompt = (
-            f"chat log (oldest → newest):\n{transcript}\n\n"
-            f"{trigger_author}: {trigger_text}\n\n"
-            "respond as pookie — one casual message like a real person texting"
+            f"most relevant context:\n{relevant_context}\n\n"
+            f"full chat log (oldest -> newest):\n{transcript}\n\n"
+            f"current message to answer:\n{trigger_author}: {trigger_text}\n\n"
+            "Use the most relevant context first. If the current message uses pronouns like he, she, they, this, or that, resolve them from the replied-to message or immediately preceding messages. "
+            "Do not say you lack context when the relevant context is provided. If the context is still genuinely unclear, say what part is unclear casually.\n"
+            "respond as pookie - one casual message like a real person texting"
+        )
+
+        log.info(
+            "PookieAI: context messages=%d replied_to=%s prompt_chars=%d",
+            len(hist),
+            bool(reference_context),
+            len(user_prompt),
+        )
+
+        try:
+            os.makedirs("logs", exist_ok=True)
+            with open("logs/pookie_prompts.log", "w", encoding="utf-8") as _f:
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                _f.write(f"=== {ts} | #{message.channel} | {trigger_author} ===\n")
+                _f.write(f"[SYSTEM]\n{system_prompt}\n\n")
+                _f.write(f"[USER]\n{user_prompt}\n")
+        except Exception:
+            log.exception("PookieAI: failed to write prompt log")
+
+        # Collect up to 2 most recent images from history + trigger message
+        image_blocks: list[dict] = []
+        image_candidates: list[discord.Attachment] = []
+        for m in reversed(hist + [message]):
+            for att in m.attachments:
+                ct = (att.content_type or "").split(";")[0].strip()
+                if ct.startswith("image/") or att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+                    image_candidates.append(att)
+            if len(image_candidates) >= 2:
+                break
+        for att in reversed(image_candidates[:2]):
+            try:
+                data = await att.read()
+                ct = _sniff_media_type(data)
+                image_blocks.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": ct, "data": base64.standard_b64encode(data).decode()},
+                })
+            except Exception:
+                log.warning("PookieAI: failed to download image %s", att.url)
+
+        user_content: list[dict] | str = (
+            image_blocks + [{"type": "text", "text": user_prompt}]
+            if image_blocks else user_prompt
         )
 
         async with message.channel.typing():
@@ -190,7 +339,7 @@ class PookieAI(commands.Cog, name="PookieAI"):
                         model=MODEL_NAME,
                         max_tokens=MAX_TOKENS,
                         system=system_prompt,
-                        messages=[{"role": "user", "content": user_prompt}],
+                        messages=[{"role": "user", "content": user_content}],
                     ),
                     timeout=REQUEST_TIMEOUT,
                 )
