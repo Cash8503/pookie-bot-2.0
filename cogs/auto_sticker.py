@@ -26,6 +26,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 try:
     from PIL import Image as _Image
     _PIL = True
@@ -263,18 +265,8 @@ class AutoStickerCog(commands.Cog, name="AutoSticker"):
 
     # ── Command ────────────────────────────────────────────────────────────────
 
-    @commands.hybrid_command(
+    @helped_hybrid_command("sticker",
         name="sticker",
-        brief="Create a guild sticker from an image",
-        help=(
-            "Creates a guild sticker from an image.\n\n"
-            "Reply to a message that has an image, or the bot will use\n"
-            "the most recently sent image in the channel.\n\n"
-            "Usage:\n"
-            "  !sticker              — auto-generate name from sender\n"
-            "  !sticker funny name   — use a specific name\n\n"
-            "Requires Manage Emojis & Stickers permission."
-        ),
     )
     @commands.guild_only()
     @commands.has_guild_permissions(manage_emojis_and_stickers=True)

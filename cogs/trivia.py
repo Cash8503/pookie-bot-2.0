@@ -6,6 +6,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger(__name__)
 
 OPENTDB_URL = "https://opentdb.com/api.php"
@@ -180,16 +182,8 @@ class TriviaCog(commands.Cog, name="Trivia"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_command(
+    @helped_hybrid_command("trivia",
         name="trivia",
-        brief="Get a random trivia question",
-        help=(
-            "Pulls a random multiple-choice trivia question from Open Trivia DB.\n\n"
-            "Click a button to answer. Wrong guesses are shown only to you — keep trying!\n"
-            "Round ends when someone gets it right or the 30 seconds run out.\n\n"
-            "Optional: specify a difficulty.\n"
-            "Usage: !trivia [easy|medium|hard]"
-        ),
     )
     async def trivia(self, ctx: commands.Context, difficulty: str | None = None):
         params: dict = {"amount": 1, "type": "multiple"}

@@ -31,6 +31,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger("ow_picker")
 
 OVERFAST_URL        = "https://overfast-api.tekrop.fr/heroes"
@@ -605,24 +607,10 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("ow",
         name="ow",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Overwatch commands — hero picker, stats & account linking",
-        help=(
-            "Overwatch hero picker, player stats, and account linking.\n\n"
-            "Subcommands:\n"
-            "  qp [count]         — Quickplay 2-2-2 role lock\n"
-            "  stadium [count]    — Stadium role-queue with interactive role selection\n"
-            "  link [member] <tag>— Link an Overwatch battletag to a Discord account\n"
-            "  unlink [member]    — Unlink a battletag\n"
-            "  stats [member]     — Show linked account's career stats\n"
-            "  whois <query>      — Look up any player by battletag or partial name\n"
-            "  linked             — List all linked battletags in this server\n\n"
-            "If you're in a voice channel, player count is detected automatically "
-            "and each person gets personally assigned a hero."
-        ),
     )
     async def ow(self, ctx: commands.Context):
         await ctx.send(
@@ -641,20 +629,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  QP subcommand
     # ------------------------------------------------------------------ #
 
-    @ow.command(
+    @helped_command(ow, "ow qp",
         name="qp",
-        brief="Pick heroes for Quickplay (2-2-2)",
-        help=(
-            "Randomly picks Overwatch heroes following the Quickplay 2-2-2 role format.\n\n"
-            "COUNT formats (order: Tank – Damage – Support):\n"
-            "  !ow qp 6      — 6 players, roles auto-distributed\n"
-            "  !ow qp 222    — exactly 2 tank · 2 damage · 2 support\n"
-            "  !ow qp 2-2-2  — same as above, dashed format\n\n"
-            "Voice channel behaviour:\n"
-            "  • Omit count entirely — uses however many humans are in your VC\n"
-            "  • Each person gets personally assigned a hero\n"
-            "  • Members are shuffled before assignment so it's fair"
-        ),
     )
     @app_commands.describe(count="Players total (6), by role (2-2-2 or 222), or omit if in a VC")
     async def ow_qp(self, ctx: commands.Context, count: str | None = None):
@@ -720,21 +696,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Stadium subcommand
     # ------------------------------------------------------------------ #
 
-    @ow.command(
+    @helped_command(ow, "ow stadium",
         name="stadium",
-        brief="Pick heroes for Stadium (role-queue)",
-        help=(
-            "Randomly picks Overwatch heroes for Stadium mode.\n\n"
-            "Voice channel (recommended — no count needed):\n"
-            "  An interactive embed is posted with Tank / Damage / Support buttons.\n"
-            "  Each VC member clicks their queued role, then gets assigned a hero.\n"
-            "  Anyone who doesn't pick within 60s gets auto-assigned a random role.\n\n"
-            "Without a VC (explicit count required):\n"
-            "  !ow stadium 5      — 5 players, Stadium 1-2-2 auto-distribution\n"
-            "  !ow stadium 122    — exactly 1 tank · 2 damage · 2 support\n"
-            "  !ow stadium 1-2-2  — same, dashed format\n\n"
-            "COUNT order is always Tank – Damage – Support."
-        ),
     )
     @app_commands.describe(count="Players total (5), by role (1-2-2 or 122), or omit if in a VC")
     async def ow_stadium(self, ctx: commands.Context, count: str | None = None):
@@ -817,19 +780,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Link / Unlink / Stats subcommands
     # ------------------------------------------------------------------ #
 
-    @ow.command(
+    @helped_command(ow, "ow link",
         name="link",
-        brief="Link an Overwatch battletag to a Discord account",
-        help=(
-            "Links an Overwatch battletag to a Discord account.\n\n"
-            "Link yourself:\n"
-            "  !ow link CoolPlayer#1234\n\n"
-            "Link someone else (bot owner only):\n"
-            "  !ow link @someone CoolPlayer#1234\n"
-            "  The linked person will receive a DM notification.\n\n"
-            "Format must be Name#1234 (case-sensitive). "
-            "Career profile must be public in Overwatch — takes up to 24 hours to apply."
-        ),
     )
     @app_commands.describe(
         member="Member to link (leave blank to link yourself)",
@@ -868,17 +820,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
                 ephemeral=True,
             )
 
-    @ow.command(
+    @helped_command(ow, "ow unlink",
         name="unlink",
-        brief="Unlink an Overwatch battletag",
-        help=(
-            "Removes a linked Overwatch battletag.\n\n"
-            "Unlink yourself:\n"
-            "  !ow unlink\n\n"
-            "Unlink someone else (bot owner only):\n"
-            "  !ow unlink @someone\n"
-            "  The person will receive a DM notification."
-        ),
     )
     @app_commands.describe(member="Member to unlink (leave blank to unlink yourself)")
     async def ow_unlink(self, ctx: commands.Context, member: discord.Member | None = None):
@@ -909,10 +852,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
         else:
             await ctx.send(f"✅ Your battletag (**{existing}**) has been unlinked.", ephemeral=True)
 
-    @ow.command(
+    @helped_command(ow, "ow linked",
         name="linked",
-        brief="List all linked Overwatch battletags in this server",
-        help="Shows every server member who has linked an Overwatch battletag.",
     )
     async def ow_linked(self, ctx: commands.Context):
         if not ctx.guild:
@@ -937,17 +878,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
         lines = "\n".join(f"**{name}** — `{tag}`" for name, tag in rows)
         await ctx.send(f"🎮 **Linked Overwatch Accounts** ({len(rows)})\n\n{lines}")
 
-    @ow.command(
+    @helped_command(ow, "ow stats",
         name="stats",
-        brief="Show Overwatch stats for a player",
-        help=(
-            "Displays competitive ranks, time played, win rate, and top heroes.\n\n"
-            "Usage:\n"
-            "  !ow stats           — your own linked account\n"
-            "  !ow stats @someone  — another server member's linked account\n\n"
-            "The target player must have their career profile set to public in Overwatch. "
-            "It can take up to 24 hours after changing the setting for it to apply."
-        ),
     )
     @app_commands.describe(user="Server member to look up (uses their linked battletag)")
     async def ow_stats(self, ctx: commands.Context, user: discord.Member | None = None):
@@ -984,17 +916,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Whois subcommand
     # ------------------------------------------------------------------ #
 
-    @ow.command(
+    @helped_command(ow, "ow whois",
         name="whois",
-        brief="Look up any Overwatch player by name or battletag",
-        help=(
-            "Search for any Overwatch player — no Discord link needed.\n\n"
-            "Full battletag (skips search, shows stats directly):\n"
-            "  !ow whois CoolPlayer#1234\n\n"
-            "Partial name (returns a list to pick from):\n"
-            "  !ow whois CoolPlayer\n\n"
-            "Private profiles will show an error after selection."
-        ),
     )
     @app_commands.describe(query="Full battletag (Name#1234) or partial name to search")
     async def ow_whois(self, ctx: commands.Context, *, query: str):

@@ -8,6 +8,8 @@ from typing import List
 import discord
 from discord.ext import commands
 
+from cogs._guild_cogs import is_cog_disabled
+
 log = logging.getLogger(__name__)
 
 try:
@@ -126,6 +128,8 @@ class PookieAI(commands.Cog, name="PookieAI"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
+            return
+        if message.guild and is_cog_disabled(self.bot.settings, message.guild.id, "pookie_ai"):
             return
         if not self.bot.user or not self.bot.user.mentioned_in(message):
             return

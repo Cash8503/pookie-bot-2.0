@@ -7,7 +7,7 @@ sync/sync_config.json
 .vscode/
 
 # Python
-venv/
+.venv
 __pycache__/
 *.pyc
 *.pyo
@@ -22,3 +22,4 @@ data/*.bak*
 # Docs
 *.md
 !README.md
+!rules.md

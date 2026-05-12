@@ -3,8 +3,16 @@ import sys
 import logging
 from pathlib import Path
 
-import discord
 from discord.ext import commands
+
+from cogs._help import helped_command, helped_hybrid_group
+from cogs._guild_cogs import (
+    PROTECTED_COGS,
+    get_disabled_cogs,
+    is_cog_disabled,
+    normalize_cog_key,
+    set_cog_disabled,
+)
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +33,33 @@ def get_all_cog_files() -> dict[str, tuple[Path, bool]]:
     enabled=False → file has a leading _ (skipped on startup)
     """
     result: dict[str, tuple[Path, bool]] = {}
-    for file in _cogs_path().glob("*.py"):
-        if file.stem.startswith("_"):
-            result[file.stem[1:]] = (file, False)
-        else:
-            result[file.stem] = (file, True)
+    cogs_path = _cogs_path()
+    for file in cogs_path.rglob("*.py"):
+        if "__pycache__" in file.parts or file.name == "__init__.py":
+            continue
+        if "async def setup(" not in file.read_text(encoding="utf-8", errors="ignore"):
+            continue
+        relative = file.relative_to(cogs_path).with_suffix("")
+        parts = list(relative.parts)
+        enabled = not parts[-1].startswith("_")
+        parts[-1] = parts[-1].lstrip("_")
+        result[".".join(parts)] = (file, enabled)
     return result
+
+
+def _format_disabled(disabled: list[str]) -> str:
+    return ", ".join(f"`{name}`" for name in disabled) or "None"
+
+
+def _match_cog_key(raw: str, all_files: dict[str, tuple[Path, bool]]) -> str:
+    name = normalize_cog_key(_resolve_cog_name(raw))
+    if name in all_files:
+        return name
+
+    matches = [key for key in all_files if key.endswith(f".{name}") or key.rsplit(".", 1)[-1] == name]
+    if len(matches) == 1:
+        return matches[0]
+    return name
 
 
 class Admin(commands.Cog, name="Admin"):
@@ -52,122 +81,140 @@ class Admin(commands.Cog, name="Admin"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("admin",
         name="admin",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Bot owner admin commands",
-        help=(
-            "Owner-only commands for managing the bot at runtime.\n\n"
-            "Startup behavior (persists across restarts):\n"
-            "  enable <cog>  — Mark cog to load on startup (removes _ prefix)\n"
-            "  disable <cog> — Mark cog to skip on startup (adds _ prefix)\n\n"
-            "Runtime control (temporary, no file changes):\n"
-            "  start <cog>   — Load a cog right now\n"
-            "  stop <cog>    — Unload a cog right now\n"
-            "  reload <cog>  — Reload a specific cog\n"
-            "  reloadall     — Reload every loaded extension\n\n"
-            "Other:\n"
-            "  list          — List all cogs, enabled/disabled, running/stopped\n"
-            "  restart       — Restart the bot process\n\n"
-            "All commands are restricted to the bot owner."
-        ),
     )
     async def admin(self, ctx: commands.Context):
         await ctx.send(
             "**Admin Commands** (owner only)\n"
-            "**Startup behavior**\n"
-            "`!admin enable <cog>`  — Mark cog to load on startup\n"
-            "`!admin disable <cog>` — Mark cog to skip on startup\n"
+            "**This server**\n"
+            "`!admin enable <cog>` - Enable a cog in this server\n"
+            "`!admin disable <cog>` - Disable a cog in this server\n"
             "**Runtime control**\n"
-            "`!admin start <cog>`   — Load a cog now\n"
-            "`!admin stop <cog>`    — Unload a cog now\n"
-            "`!admin reload <cog>`  — Reload a cog\n"
-            "`!admin reloadall`     — Reload all cogs\n"
+            "`!admin start <cog>` - Load a cog now\n"
+            "`!admin stop <cog>` - Unload a cog now\n"
+            "`!admin reload <cog>` - Reload a cog\n"
+            "`!admin reloadall` - Reload all cogs\n"
+            "**Startup behavior**\n"
+            "`!admin globalenable <cog>` - Mark cog to load on startup\n"
+            "`!admin globaldisable <cog>` - Mark cog to skip on startup\n"
             "**Other**\n"
-            "`!admin list`          — List all cogs and status\n"
-            "`!admin restart`       — Restart the bot process\n\n"
+            "`!admin list` - List all cogs and status\n"
+            "`!admin restart` - Restart the bot process\n\n"
             "Run `!help admin <subcommand>` for full details."
         )
 
     # ------------------------------------------------------------------ #
-    #  Startup behavior — enable / disable
+    #  Per-guild availability
     # ------------------------------------------------------------------ #
 
-    @admin.command(
+    @helped_command(admin, "admin enable",
         name="enable",
-        brief="Mark a cog to load on startup",
-        help=(
-            "Removes the leading _ from the cog's filename so it will be loaded "
-            "automatically on the next bot startup.\n\n"
-            "Does not start the cog immediately — use `!admin start <cog>` for that.\n\n"
-            "Example:\n"
-            "  !admin enable ow_picker"
-        ),
     )
     async def enable_cog(self, ctx: commands.Context, cog: str):
-        name = _resolve_cog_name(cog)
+        if ctx.guild is None:
+            await ctx.send("Use this in a server, or use `!admin globalenable <cog>` for startup behavior.")
+            return
+
         all_files = get_all_cog_files()
+        name = _match_cog_key(cog, all_files)
 
         if name not in all_files:
-            await ctx.send(f"❌ No cog named `{name}` found.")
+            await ctx.send(f"No cog named `{name}` found.")
+            return
+
+        if not is_cog_disabled(self.bot.settings, ctx.guild.id, name):
+            await ctx.send(f"`{name}` is already enabled in **{ctx.guild.name}**.")
+            return
+
+        disabled = await set_cog_disabled(self.bot.settings, ctx.guild.id, name, False)
+        await ctx.send(
+            f"Enabled `{name}` in **{ctx.guild.name}**.\n"
+            f"Disabled here: {_format_disabled(disabled)}"
+        )
+        log.info("Enabled cog %s in guild %s (requested by %s)", name, ctx.guild.id, ctx.author)
+
+    @helped_command(admin, "admin disable",
+        name="disable",
+    )
+    async def disable_cog(self, ctx: commands.Context, cog: str):
+        if ctx.guild is None:
+            await ctx.send("Use this in a server, or use `!admin globaldisable <cog>` for startup behavior.")
+            return
+
+        all_files = get_all_cog_files()
+        name = _match_cog_key(cog, all_files)
+
+        if name not in all_files:
+            await ctx.send(f"No cog named `{name}` found.")
+            return
+        if name in PROTECTED_COGS:
+            await ctx.send(f"`{name}` cannot be disabled per server.")
+            return
+
+        if is_cog_disabled(self.bot.settings, ctx.guild.id, name):
+            await ctx.send(f"`{name}` is already disabled in **{ctx.guild.name}**.")
+            return
+
+        disabled = await set_cog_disabled(self.bot.settings, ctx.guild.id, name, True)
+        await ctx.send(
+            f"Disabled `{name}` in **{ctx.guild.name}**.\n"
+            f"Disabled here: {_format_disabled(disabled)}"
+        )
+        log.info("Disabled cog %s in guild %s (requested by %s)", name, ctx.guild.id, ctx.author)
+
+    @helped_command(admin, "admin globalenable", name="globalenable")
+    async def global_enable_cog(self, ctx: commands.Context, cog: str):
+        all_files = get_all_cog_files()
+        name = _match_cog_key(cog, all_files)
+
+        if name not in all_files:
+            await ctx.send(f"No cog named `{name}` found.")
             return
 
         path, enabled = all_files[name]
         if enabled:
-            await ctx.send(f"ℹ️ `{name}` is already enabled.")
+            await ctx.send(f"`{name}` is already globally enabled.")
             return
 
-        new_path = path.parent / f"{name}.py"
+        new_path = path.parent / f"{path.stem.lstrip('_')}.py"
         path.rename(new_path)
-        await ctx.send(f"✅ Enabled `{name}` — it will load on next startup.")
-        log.info("Enabled cog %s (requested by %s)", name, ctx.author)
+        await ctx.send(f"Globally enabled `{name}` - it will load on next startup.")
+        log.info("Globally enabled cog %s (requested by %s)", name, ctx.author)
 
-    @admin.command(
-        name="disable",
-        brief="Mark a cog to skip on startup",
-        help=(
-            "Adds a leading _ to the cog's filename so it will be skipped "
-            "automatically on the next bot startup.\n\n"
-            "Does not stop the cog immediately — use `!admin stop <cog>` for that.\n\n"
-            "Example:\n"
-            "  !admin disable ow_picker"
-        ),
-    )
-    async def disable_cog(self, ctx: commands.Context, cog: str):
-        name = _resolve_cog_name(cog)
+    @helped_command(admin, "admin globaldisable", name="globaldisable")
+    async def global_disable_cog(self, ctx: commands.Context, cog: str):
         all_files = get_all_cog_files()
+        name = _match_cog_key(cog, all_files)
 
         if name not in all_files:
-            await ctx.send(f"❌ No cog named `{name}` found.")
+            await ctx.send(f"No cog named `{name}` found.")
+            return
+        if name in PROTECTED_COGS:
+            await ctx.send(f"`{name}` cannot be globally disabled from Discord.")
             return
 
         path, enabled = all_files[name]
         if not enabled:
-            await ctx.send(f"ℹ️ `{name}` is already disabled.")
+            await ctx.send(f"`{name}` is already globally disabled.")
             return
 
-        new_path = path.parent / f"_{name}.py"
+        new_path = path.parent / f"_{path.name}"
         path.rename(new_path)
-        await ctx.send(f"✅ Disabled `{name}` — it will be skipped on next startup.")
-        log.info("Disabled cog %s (requested by %s)", name, ctx.author)
+        await ctx.send(f"Globally disabled `{name}` - it will be skipped on next startup.")
+        log.info("Globally disabled cog %s (requested by %s)", name, ctx.author)
 
     # ------------------------------------------------------------------ #
     #  Runtime control — start / stop / reload
     # ------------------------------------------------------------------ #
 
-    @admin.command(
+    @helped_command(admin, "admin start",
         name="start",
-        brief="Load a cog now (temporary)",
-        help=(
-            "Loads a cog into the running bot without changing its startup behavior.\n\n"
-            "To also make it load on restart, use `!admin enable <cog>` first.\n\n"
-            "Example:\n"
-            "  !admin start ow_picker"
-        ),
     )
     async def start_cog(self, ctx: commands.Context, cog: str):
-        name = _resolve_cog_name(cog)
+        name = _match_cog_key(cog, get_all_cog_files())
         ext = f"cogs.{name}"
         try:
             await self.bot.load_extension(ext)
@@ -176,18 +223,11 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to start `{name}`: `{e}`")
 
-    @admin.command(
+    @helped_command(admin, "admin stop",
         name="stop",
-        brief="Unload a cog now (temporary)",
-        help=(
-            "Unloads a cog from the running bot without changing its startup behavior.\n\n"
-            "To also prevent it from loading on restart, use `!admin disable <cog>`.\n\n"
-            "Example:\n"
-            "  !admin stop ow_picker"
-        ),
     )
     async def stop_cog(self, ctx: commands.Context, cog: str):
-        name = _resolve_cog_name(cog)
+        name = _match_cog_key(cog, get_all_cog_files())
         ext = f"cogs.{name}"
         try:
             await self.bot.unload_extension(ext)
@@ -196,18 +236,11 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to stop `{name}`: `{e}`")
 
-    @admin.command(
+    @helped_command(admin, "admin reload",
         name="reload",
-        brief="Reload a cog",
-        help=(
-            "Reloads a cog by name. If the cog isn't currently loaded, "
-            "attempts to load it instead.\n\n"
-            "Example:\n"
-            "  !admin reload link_cleaner"
-        ),
     )
     async def reload_cog(self, ctx: commands.Context, cog: str):
-        name = _resolve_cog_name(cog)
+        name = _match_cog_key(cog, get_all_cog_files())
         ext = f"cogs.{name}"
         try:
             await self.bot.reload_extension(ext)
@@ -224,14 +257,8 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to reload `{name}`: `{e}`")
 
-    @admin.command(
+    @helped_command(admin, "admin reloadall",
         name="reloadall",
-        brief="Reload all running cogs",
-        help=(
-            "Reloads every currently loaded extension in one go.\n\n"
-            "Reports the result for each cog — ✅ for success, ❌ for failure "
-            "with the error message. Useful after pulling code changes."
-        ),
     )
     async def reload_all(self, ctx: commands.Context):
         log.info("Reloading all cogs (requested by %s)", ctx.author)
@@ -244,17 +271,8 @@ class Admin(commands.Cog, name="Admin"):
                 results.append(f"❌ `{ext}` — {e}")
         await ctx.send("\n".join(results[:25]))
 
-    @admin.command(
+    @helped_command(admin, "admin list",
         name="list",
-        brief="List all cogs, their enabled state, and running state",
-        help=(
-            "Lists every cog file and shows two status flags:\n"
-            "  ▶️  running now   |  ⏹  stopped\n"
-            "  ✅  enabled (loads on startup)  |  🚫  disabled\n\n"
-            "Example output:\n"
-            "  ▶️ ✅ link_cleaner\n"
-            "  ⏹ 🚫 ow_picker"
-        ),
     )
     async def list_cogs(self, ctx: commands.Context):
         log.info("Listing cogs (requested by %s)", ctx.author)
@@ -263,26 +281,22 @@ class Admin(commands.Cog, name="Admin"):
             await ctx.send("No cog files found.")
             return
 
+        guild_disabled = get_disabled_cogs(self.bot.settings, ctx.guild.id) if ctx.guild else []
         results = []
         for name, (_, enabled) in sorted(all_files.items()):
             running = f"cogs.{name}" in self.bot.extensions
             run_icon = "▶️" if running else "⏹"
             ena_icon = "✅" if enabled else "🚫"
-            results.append(f"{run_icon} {ena_icon} `{name}`")
+            guild_icon = "🔕" if name in guild_disabled else "🔔"
+            results.append(f"{run_icon} {ena_icon} {guild_icon} `{name}`")
+
+        if ctx.guild:
+            results.insert(0, f"Disabled in **{ctx.guild.name}**: {_format_disabled(guild_disabled)}")
 
         await ctx.send("\n".join(results[:25]))
 
-    @admin.command(
+    @helped_command(admin, "admin nuke",
         name="nuke",
-        brief="Delete the last N messages in this channel",
-        help=(
-            "Bulk-deletes the last N messages in the current channel (max 100).\n\n"
-            "Discord only allows bulk-deleting messages under 14 days old. "
-            "Messages older than that are skipped.\n\n"
-            "Examples:\n"
-            "  !admin nuke 10   — delete the last 10 messages\n"
-            "  !admin nuke 50   — delete the last 50 messages"
-        ),
     )
     async def nuke(self, ctx: commands.Context, count: int):
         if count < 1 or count > 100:
@@ -294,14 +308,8 @@ class Admin(commands.Cog, name="Admin"):
         await ctx.send(f"🗑️ Deleted **{len(deleted)}** message(s).")
         log.info("Nuke: deleted %d message(s) in #%s (requested by %s)", len(deleted), ctx.channel, ctx.author)
 
-    @admin.command(
+    @helped_command(admin, "admin restart",
         name="restart",
-        brief="Restart the bot process",
-        help=(
-            "Gracefully closes the bot and restarts the process using os.execv.\n\n"
-            "This is a hard restart — the same as killing and relaunching the script. "
-            "All in-memory state (guild settings, hero cache, etc.) will be reset."
-        ),
     )
     async def restart_bot(self, ctx: commands.Context):
         await ctx.send("♻️ Restarting...")

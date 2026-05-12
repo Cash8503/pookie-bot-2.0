@@ -29,6 +29,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._guild_cogs import is_cog_disabled
+
 log = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
@@ -221,6 +224,8 @@ class ActivityCog(commands.Cog, name="Activity"):
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
             return
+        if is_cog_disabled(self.bot.settings, message.guild.id, "activity"):
+            return
 
         month = _month_key()
         s     = self.bot.settings
@@ -248,6 +253,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         guild = getattr(reaction.message, "guild", None)
         if not guild:
             return
+        if is_cog_disabled(self.bot.settings, guild.id, "activity"):
+            return
 
         month     = _month_key()
         s         = self.bot.settings
@@ -266,6 +273,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         after: discord.VoiceState,
     ):
         if member.bot:
+            return
+        if is_cog_disabled(self.bot.settings, member.guild.id, "activity"):
             return
 
         key = (member.guild.id, member.id)
@@ -308,21 +317,10 @@ class ActivityCog(commands.Cog, name="Activity"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("activity",
         name="activity",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Server activity stats and leaderboard",
-        help=(
-            "Track and display server activity stats.\n\n"
-            "Subcommands:\n"
-            "  summary [all]        — Top 10 snapshot of all main categories\n"
-            "  leaderboard [all]    — Top 10 most active members (this month or all time)\n"
-            "  stats [@member]      — Individual stats for a member\n"
-            "  emojis [all]         — Most used emojis (this month or all time)\n"
-            "  emoji <emoji> [all]  — Who uses a specific emoji the most\n\n"
-            "Activity score = messages + (voice minutes × 5) + (emoji uses × 0.5)"
-        ),
     )
     async def activity(self, ctx: commands.Context):
         await ctx.send(
@@ -335,16 +333,9 @@ class ActivityCog(commands.Cog, name="Activity"):
             "Run `!help activity <subcommand>` for details."
         )
 
-    @activity.command(
+    @helped_command(activity, "activity leaderboard",
         name="leaderboard",
         aliases=["top"],
-        brief="Top 10 most active members",
-        help=(
-            "Shows the top 10 most active members ranked by activity score.\n\n"
-            "Usage:\n"
-            "  !activity leaderboard       — this month\n"
-            "  !activity leaderboard all   — all time"
-        ),
     )
     @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def leaderboard(self, ctx: commands.Context, period: str = "month"):
@@ -412,15 +403,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         view   = _LeaderboardPaginator(lines, title, footer)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @activity.command(
+    @helped_command(activity, "activity stats",
         name="stats",
-        brief="View activity stats for a member",
-        help=(
-            "Shows this month's activity stats for a member.\n\n"
-            "Usage:\n"
-            "  !activity stats          — your own stats\n"
-            "  !activity stats @someone — another member's stats"
-        ),
     )
     @app_commands.describe(member="Member to check (leave blank for yourself)")
     async def stats(self, ctx: commands.Context, member: discord.Member = None):
@@ -481,15 +465,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         embed.set_thumbnail(url=target.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @activity.command(
+    @helped_command(activity, "activity emojis",
         name="emojis",
-        brief="Most used emoji reactions",
-        help=(
-            "Shows the top 10 most used emoji reactions server-wide.\n\n"
-            "Usage:\n"
-            "  !activity emojis       — this month\n"
-            "  !activity emojis all   — all time"
-        ),
     )
     @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def emojis(self, ctx: commands.Context, period: str = "month"):
@@ -523,16 +500,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
 
-    @activity.command(
+    @helped_command(activity, "activity emoji",
         name="emoji",
-        brief="Who uses a specific emoji the most",
-        help=(
-            "Shows the top 10 users of a specific emoji.\n\n"
-            "Usage:\n"
-            "  !activity emoji 😭           — unicode emoji, this month\n"
-            "  !activity emoji :pookie:     — custom emoji by name, this month\n"
-            "  !activity emoji :pookie: all — all time"
-        ),
     )
     @app_commands.describe(emoji="The emoji to look up", period="'all' for lifetime, blank for this month")
     async def emoji_who(self, ctx: commands.Context, emoji: str, period: str = "month"):
@@ -595,15 +564,8 @@ class ActivityCog(commands.Cog, name="Activity"):
         view  = _LeaderboardPaginator(lines, title)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @activity.command(
+    @helped_command(activity, "activity summary",
         name="summary",
-        brief="Top 10 snapshot of all main categories",
-        help=(
-            "Shows top 10 for messages, voice time, and emoji usage side by side.\n\n"
-            "Usage:\n"
-            "  !activity summary       — this month\n"
-            "  !activity summary all   — all time"
-        ),
     )
     @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def summary(self, ctx: commands.Context, period: str = "month"):
@@ -671,19 +633,8 @@ class ActivityCog(commands.Cog, name="Activity"):
 
         await ctx.send(embed=embed)
 
-    @activity.command(
+    @helped_command(activity, "activity backfill",
         name="backfill",
-        brief="Rebuild activity stats from full channel history",
-        help=(
-            "Scans every accessible text channel and rebuilds activity data from scratch.\n\n"
-            "⚠️ This REPLACES all existing activity data.\n"
-            "It will take a long time on active servers — reactions are especially slow\n"
-            "because Discord requires a separate API call per reaction type per message.\n\n"
-            "Usage:\n"
-            "  !activity backfill             — show this warning\n"
-            "  !activity backfill confirm     — actually run it\n\n"
-            "Requires Manage Server permission."
-        ),
     )
     @commands.has_permissions(manage_guild=True)
     async def backfill(self, ctx: commands.Context, confirm: str = ""):

@@ -5,6 +5,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger(__name__)
 
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -261,22 +263,10 @@ class MoviesCog(commands.Cog, name="Movies"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("movie",
         name="movie",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Look up movies — ratings & where to watch",
-        help=(
-            "Search for movies by title or browse by genre.\n\n"
-            "Subcommands:\n"
-            "  movie <title>          — Search by title\n"
-            "  movie genre <name>     — Browse top movies in a genre\n\n"
-            "Shows IMDb, Rotten Tomatoes, and TMDB ratings plus US streaming availability.\n\n"
-            "Requires TMDB_API_KEY in your .env "
-            "(free key at https://www.themoviedb.org/settings/api).\n"
-            "Optional: OMDB_API_KEY for IMDb/RT ratings "
-            "(free at https://www.omdbapi.com/apikey.aspx)."
-        ),
     )
     async def movie(self, ctx: commands.Context, *, query: str = None):
         if not query:
@@ -321,14 +311,8 @@ class MoviesCog(commands.Cog, name="Movies"):
             view = WrongMovieView(results, session, tmdb_key, omdb_key)
             await ctx.send(embed=embed, view=view)
 
-    @movie.command(
+    @helped_command(movie, "movie genre",
         name="genre",
-        brief="Browse top movies by genre",
-        help=(
-            "Show the most popular movies in a genre.\n\n"
-            "Usage: !movie genre <name>\n\n"
-            "Examples: !movie genre action, !movie genre horror, !movie genre sci-fi"
-        ),
     )
     async def movie_genre(self, ctx: commands.Context, *, genre: str):
         tmdb_key = os.getenv("TMDB_API_KEY")

@@ -1,7 +1,13 @@
 import logging
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger(__name__)
+
+
+# Add real command metadata to HELP_CONTENT in cogs/_help.py first.
+# The helped_* decorators require that entry and make it the source of truth.
 
 
 class TemplateCog(commands.Cog, name="Template"):
@@ -20,17 +26,10 @@ class TemplateCog(commands.Cog, name="Template"):
     #  Example hybrid command group
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("template",
         name="template",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Short description for !help list",
-        help=(
-            "Full description shown in !help template.\n\n"
-            "Subcommands:\n"
-            "  example — Does something\n\n"
-            "Add more detail here as needed."
-        ),
     )
     async def template(self, ctx: commands.Context):
         await ctx.send(
@@ -39,13 +38,8 @@ class TemplateCog(commands.Cog, name="Template"):
             "Run `!help template <subcommand>` for full details."
         )
 
-    @template.command(
+    @helped_command(template, "template example",
         name="example",
-        brief="Short description for !help list",
-        help=(
-            "Full description shown in !help template example.\n\n"
-            "Explain usage, args, and behaviour here."
-        ),
     )
     async def example(self, ctx: commands.Context):
         await ctx.send("Hello from the template cog!")

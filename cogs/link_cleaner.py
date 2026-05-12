@@ -15,6 +15,8 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 import discord
 from discord.ext import commands
 
+from cogs._guild_cogs import is_cog_disabled
+
 log = logging.getLogger("link_cleaner")
 
 # ---------------------------------------------------------------------------
@@ -224,6 +226,8 @@ class LinkCleaner(commands.Cog, name="Link Cleaner"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
+            return
+        if is_cog_disabled(self.bot.settings, message.guild.id, "link_cleaner"):
             return
         s = self.bot.settings
         if not s.get(message.guild.id, "link_cleaner", "enabled", True):

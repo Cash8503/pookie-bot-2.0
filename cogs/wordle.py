@@ -6,6 +6,8 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
+
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
 from PIL import Image, ImageDraw, ImageFont
 
 log = logging.getLogger(__name__)
@@ -383,19 +385,9 @@ class WordleCog(commands.Cog, name="Wordle"):
     def cog_unload(self):
         log.info("Cog Unloaded.")
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("wordle",
         name="wordle",
         invoke_without_command=True,
-        brief="Play today's Wordle",
-        help=(
-            "Start or resume today's Wordle. Each user gets their own unique word.\n\n"
-            "Click the **Make a Guess** button and type your guess in the popup.\n"
-            "You have 6 attempts. Your word resets every day at midnight UTC.\n\n"
-            "🟩 = right letter, right spot\n"
-            "🟨 = right letter, wrong spot\n"
-            "⬛ = letter not in the word\n\n"
-            "Subcommands: `reset`, `stats`"
-        ),
     )
     async def wordle(self, ctx: commands.Context):
         today  = datetime.now(timezone.utc).date().isoformat()
@@ -418,7 +410,7 @@ class WordleCog(commands.Cog, name="Wordle"):
 
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @wordle.command(name="reset", brief="Get a fresh word for today")
+    @helped_command(wordle, "wordle reset", name="reset")
     async def wordle_reset(self, ctx: commands.Context):
         """Abandon your current word and get a new one. Won't count against your stats."""
         today  = datetime.now(timezone.utc).date().isoformat()
@@ -434,7 +426,7 @@ class WordleCog(commands.Cog, name="Wordle"):
         view = WordleView(self.bot, ctx.author.id)
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @wordle.command(name="stats", brief="View your Wordle stats")
+    @helped_command(wordle, "wordle stats", name="stats")
     async def wordle_stats(self, ctx: commands.Context):
         """Show your lifetime Wordle stats."""
         stats = self.bot.settings.get_user(ctx.author.id, "wordle", "stats")

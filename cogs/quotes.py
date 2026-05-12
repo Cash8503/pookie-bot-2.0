@@ -29,6 +29,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger(__name__)
 
 MAX_QUOTE_LEN = 4000
@@ -126,22 +128,10 @@ class QuotesCog(commands.Cog, name="Quotes"):
     #  Root command — !quote [context_spec]
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("quote",
         name="quote",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Save a quote to the quotebook",
-        help=(
-            "Reply to any message with `!quote` to save it to the quotebook channel.\n\n"
-            "Include context:\n"
-            "  !quote 4       — anchor + next 4 messages\n"
-            "  !quote 1,4,5   — anchor + messages at offsets 1, 4, 5\n"
-            "  !quote 1-3,5   — anchor + offsets 1,2,3 and 5\n\n"
-            "The quotebook channel must be set first:\n"
-            "  !config quotebook #channel\n\n"
-            "Subcommands:\n"
-            "  random — Pull a random saved quote"
-        ),
     )
     async def quote(self, ctx: commands.Context, *, args: str = None):
         if not ctx.guild:
@@ -267,10 +257,8 @@ class QuotesCog(commands.Cog, name="Quotes"):
     #  !quote random
     # ------------------------------------------------------------------ #
 
-    @quote.command(
+    @helped_command(quote, "quote random",
         name="random",
-        brief="Pull a random saved quote",
-        help="Displays a random quote from this server's quotebook.",
     )
     async def quote_random(self, ctx: commands.Context):
         if not ctx.guild:

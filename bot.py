@@ -10,6 +10,15 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from cogs._help import (
+    apply_help_content,
+    helped_bot_hybrid_command,
+    send_bot_help,
+    send_command_help,
+    validate_hybrid_commands,
+)
+from cogs._guild_cogs import GuildCogDisabled, cog_key_from_command, cog_key_from_module, is_cog_disabled
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 load_dotenv()
@@ -212,12 +221,18 @@ class SettingsManager:
 # Cog discovery
 # ---------------------------------------------------------------------------
 
+def _is_loadable_cog_file(path: Path) -> bool:
+    if path.name == "__init__.py" or path.name.startswith("_") or "__pycache__" in path.parts:
+        return False
+    return "async def setup(" in path.read_text(encoding="utf-8", errors="ignore")
+
+
 def get_cogs():
     cogs_path = Path(__file__).parent / "cogs"
     return [
         "cogs." + ".".join(f.relative_to(cogs_path).with_suffix("").parts)
         for f in cogs_path.rglob("*.py")
-        if not f.name.startswith("_") and "__pycache__" not in f.parts
+        if _is_loadable_cog_file(f)
     ]
 
 
@@ -226,7 +241,7 @@ def _get_cog_files() -> dict[str, Path]:
     return {
         "cogs." + ".".join(f.relative_to(cogs_path).with_suffix("").parts): f
         for f in cogs_path.rglob("*.py")
-        if not f.name.startswith("_") and "__pycache__" not in f.parts
+        if _is_loadable_cog_file(f)
     }
 
 
@@ -238,13 +253,75 @@ bot = commands.Bot(
     command_prefix=os.getenv("PREFIX", "!"),
     intents=intents,
     case_insensitive=True,
-    # help_command left as default — reads brief/help strings from each command
+    help_command=None,
 )
 
 _reload_task = None
 _flush_task  = None
 _sync_task   = None
 _file_mtimes: dict[str, float] = {}
+
+
+@helped_bot_hybrid_command(bot, "help", name="help")
+async def help_command(ctx: commands.Context, *, command: str | None = None):
+    if not command:
+        await send_bot_help(ctx, bot)
+        return
+
+    target = bot.get_command(command.strip().lower())
+    if target is None:
+        await ctx.send(f"No command named `{command}` was found.", ephemeral=True)
+        return
+    await send_command_help(ctx, target)
+
+
+@bot.check
+async def guild_cog_enabled_check(ctx: commands.Context) -> bool:
+    if ctx.guild is None:
+        return True
+    cog_key = cog_key_from_command(ctx.command)
+    if is_cog_disabled(bot.settings, ctx.guild.id, cog_key):
+        raise GuildCogDisabled(cog_key or "unknown")
+    return True
+
+
+async def guild_cog_enabled_interaction_check(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None or interaction.command is None:
+        return True
+
+    command = interaction.command
+    binding = getattr(command, "binding", None)
+    if binding is not None:
+        cog_key = cog_key_from_module(binding.__class__.__module__)
+    else:
+        callback = getattr(command, "callback", None)
+        cog_key = cog_key_from_module(getattr(callback, "__module__", None))
+
+    if not is_cog_disabled(bot.settings, interaction.guild.id, cog_key):
+        return True
+
+    message = f"`{cog_key}` is disabled in this server."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        log.warning("Failed to send disabled-cog slash response for %s", cog_key)
+    return False
+
+
+bot.tree.interaction_check = guild_cog_enabled_interaction_check
+
+
+def refresh_command_metadata() -> None:
+    """Apply centralized command help and warn if commands drift from policy."""
+    missing = apply_help_content(bot)
+    non_hybrid = validate_hybrid_commands(bot)
+    if missing:
+        log.warning("Command help metadata is missing for %d command(s).", len(missing))
+    if non_hybrid:
+        log.warning("Found %d non-hybrid command(s).", len(non_hybrid))
 
 
 async def periodic_flush():
@@ -307,6 +384,7 @@ async def on_ready():
     log.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
     try:
+        refresh_command_metadata()
         synced = await bot.tree.sync()
         log.info(f"Synced {len(synced)} slash command(s)")
     except Exception as e:
@@ -328,6 +406,12 @@ async def on_ready():
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.MissingRequiredArgument):
+        await send_command_help(ctx, error=error)
+        return
+    if isinstance(error, GuildCogDisabled):
+        await ctx.send(str(error), ephemeral=True)
         return
     log.error(f"Command error in {ctx.command}: {error}")
 
@@ -365,6 +449,7 @@ async def watch_cogs():
                     log.info(f"New cog detected: {ext} — loading...")
                     await bot.load_extension(ext)
                     _file_mtimes[ext] = mtime
+                    refresh_command_metadata()
                 except Exception:
                     log.exception(f"Failed to load new cog {ext}")
                 continue
@@ -374,6 +459,7 @@ async def watch_cogs():
                     log.info(f"Change detected in {ext} — reloading...")
                     await bot.reload_extension(ext)
                     _file_mtimes[ext] = mtime
+                    refresh_command_metadata()
                     bot.tree.clear_commands(guild=None)
                     await bot.tree.sync()
                 except Exception:
@@ -402,6 +488,7 @@ async def main():
                     await bot.load_extension(cog)
                 except Exception:
                     log.exception(f"Failed to load cog {cog}")
+            refresh_command_metadata()
             log.info("All cogs loaded. Starting bot.")
             await bot.start(os.getenv("DISCORD_TOKEN"))
     finally:

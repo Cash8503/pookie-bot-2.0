@@ -4,6 +4,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 log = logging.getLogger(__name__)
 
 _GUILD = "guild"
@@ -58,26 +60,10 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("db",
         name="db",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Database admin commands (owner only)",
-        help=(
-            "Owner-only commands for inspecting and editing the bot's settings.\n\n"
-            "Tables:\n"
-            "  guild  →  guild_settings (guild_id, namespace, key, value)\n"
-            "  user   →  user_settings  (user_id,  namespace, key, value)\n\n"
-            "Values are stored as JSON. When setting a value:\n"
-            "  • Plain text like  hello       → stored as string\n"
-            "  • JSON like        123 / true  → stored as number / bool\n\n"
-            "Subcommands:\n"
-            "  tables                               — row counts per table\n"
-            "  get <guild|user> <id> [ns] [key]     — read rows\n"
-            "  set <guild|user> <id> <ns> <key> <v> — upsert a value\n"
-            "  del <guild|user> <id> <ns> <key>     — delete one row\n"
-            "  clear <guild|user> <id> [ns]         — delete all rows for ID\n"
-        ),
     )
     async def db(self, ctx: commands.Context):
         await ctx.send(
@@ -93,7 +79,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
     #  Subcommands
     # ------------------------------------------------------------------ #
 
-    @db.command(name="tables", brief="Show row counts for all tables")
+    @helped_command(db, "db tables", name="tables")
     async def db_tables(self, ctx: commands.Context):
         s = self.bot.settings
         guild_rows = sum(
@@ -111,17 +97,8 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"`user_settings` (user) — **{user_rows}** row(s)"
         )
 
-    @db.command(
+    @helped_command(db, "db get",
         name="get",
-        brief="Read rows from a table",
-        help=(
-            "Reads rows from guild_settings or user_settings.\n\n"
-            "Examples:\n"
-            "  !db get user 123456789               — all rows for user\n"
-            "  !db get user 123456789 ow            — all rows in namespace 'ow'\n"
-            "  !db get user 123456789 ow battletag  — single value\n"
-            "  !db get guild 987654321 link_cleaner — all rows in namespace"
-        ),
     )
     async def db_get(
         self,
@@ -166,15 +143,8 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         for chunk in _paginate(header + "\n".join(rows)):
             await ctx.send(chunk)
 
-    @db.command(
+    @helped_command(db, "db find",
         name="find",
-        brief="Search all tables for an ID",
-        help=(
-            "Searches both guild_settings and user_settings for any rows matching the given ID.\n\n"
-            "Examples:\n"
-            "  !db find 123456789\n"
-            "  !db find @someone"
-        ),
     )
     async def db_find(self, ctx: commands.Context, entity_id: str):
         try:
@@ -204,17 +174,8 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         if not any_results:
             await ctx.send(f"No rows found for ID `{eid}` in any table.")
 
-    @db.command(
+    @helped_command(db, "db set",
         name="set",
-        brief="Upsert a value in a table",
-        help=(
-            "Inserts or updates a single row. The value is parsed as JSON if valid,\n"
-            "otherwise stored as a plain string.\n\n"
-            "Examples:\n"
-            "  !db set user 123456789 ow battletag CoolPlayer#1234\n"
-            "  !db set guild 987654321 link_cleaner enabled true\n"
-            "  !db set user 123456789 xp level 42"
-        ),
     )
     async def db_set(
         self,
@@ -250,15 +211,8 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"✅ `{table_name}[{eid}].{namespace}.{key}` → `{json.dumps(parsed)}`"
         )
 
-    @db.command(
+    @helped_command(db, "db del",
         name="del",
-        brief="Delete a single row",
-        help=(
-            "Deletes one specific row identified by (id, namespace, key).\n\n"
-            "Examples:\n"
-            "  !db del user 123456789 ow battletag\n"
-            "  !db del guild 987654321 link_cleaner enabled"
-        ),
     )
     async def db_del(
         self,
@@ -288,16 +242,8 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         table_name = "guild_settings" if guild else "user_settings"
         await ctx.send(f"✅ Deleted `{table_name}[{eid}].{namespace}.{key}`")
 
-    @db.command(
+    @helped_command(db, "db clear",
         name="clear",
-        brief="Delete all rows for an ID (optionally filtered by namespace)",
-        help=(
-            "Deletes every row for a given ID. Optionally scope to one namespace.\n\n"
-            "Examples:\n"
-            "  !db clear user 123456789           — remove all data for user\n"
-            "  !db clear user 123456789 ow        — remove only the 'ow' namespace\n"
-            "  !db clear guild 987654321           — wipe all settings for a guild"
-        ),
     )
     async def db_clear(
         self,

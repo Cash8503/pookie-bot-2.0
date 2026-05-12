@@ -16,6 +16,7 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
+from cogs._guild_cogs import is_cog_disabled
 from cogs.ow_picker import fetch_player, _battletag_to_player_id, _fmt_rank
 
 log = logging.getLogger(__name__)
@@ -150,6 +151,8 @@ class RankTracker(commands.Cog, name="Rank Tracker"):
         # Find guilds that have a rank tracker channel set
         tracked_guilds: dict[int, int] = {}
         for guild_id, namespaces in s._cache.items():
+            if is_cog_disabled(s, guild_id, "tasks.rank_tracker"):
+                continue
             channel_id = namespaces.get("rank_tracker", {}).get("channel")
             if channel_id:
                 tracked_guilds[guild_id] = channel_id

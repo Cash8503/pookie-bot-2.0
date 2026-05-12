@@ -7,3 +7,5 @@ paramiko>=3.0
 watchdog>=4.0
 anthropic>=0.40.0
 opencv-python-headless>=4.8.0
+sqlite-sync-core>=0.7.1
+pyspellchecker>=0.8.1

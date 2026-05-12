@@ -31,6 +31,8 @@ from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
+from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+
 try:
     from anthropic import AsyncAnthropic as _AsyncAnthropic
 except ImportError:
@@ -235,17 +237,10 @@ class StatusCog(commands.Cog, name="Status"):
     #  Owner commands
     # ------------------------------------------------------------------ #
 
-    @commands.hybrid_group(
+    @helped_hybrid_group("status",
         name="status",
         invoke_without_command=True,
         case_insensitive=True,
-        brief="Status management commands",
-        help=(
-            "Commands for managing the bot's rotating status messages.\n\n"
-            "Subcommands:\n"
-            "  refresh — Manually trigger the weekly AI re-generation of statuses.txt\n\n"
-            "All commands are restricted to the bot owner."
-        ),
     )
     async def status_group(self, ctx: commands.Context):
         await ctx.send(
@@ -253,15 +248,8 @@ class StatusCog(commands.Cog, name="Status"):
             "`!status refresh` — Manually regenerate statuses.txt via AI"
         )
 
-    @status_group.command(
+    @helped_command(status_group, "status refresh",
         name="refresh",
-        brief="Manually trigger the weekly AI status re-generation",
-        help=(
-            "Immediately runs the weekly AI refresh that rewrites statuses.txt "
-            "with a fresh batch of status messages.\n\n"
-            "Requires the Anthropic API key to be configured. "
-            "The result is loaded into the rotation straight away."
-        ),
     )
     @commands.is_owner()
     async def refresh(self, ctx: commands.Context):
