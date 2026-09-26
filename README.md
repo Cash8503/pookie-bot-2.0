@@ -1,113 +1,82 @@
-# 🧹 Discord Link Cleaner Bot
+# Pookie Bot 2.0
 
-Automatically strips tracking parameters, referral codes, and ad junk from URLs posted in your Discord server.
-
-## What it strips
-
-| Category | Examples |
-|---|---|
-| UTM params | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term` |
-| Facebook | `fbclid`, `fb_action_ids`, `fb_ref`, `fb_source`, `mibextid` |
-| Google | `gclid`, `gclsrc`, `dclid`, `_ga` |
-| Microsoft / Bing | `msclkid`, `ocid` |
-| Amazon | `tag`, `ref`, `pf_rd_*`, `pd_rd_*`, `smid`, `sprefix`, `linkId` |
-| YouTube | `si` (share tracking) |
-| TikTok | `_r`, `_t`, `refer`, `share_app_id`, `share_link_id` |
-| Spotify | `si`, `context`, `nd` |
-| Twitter / X | `twclid` |
-| Mailchimp | `mc_cid`, `mc_eid` |
-| Generic | `ref`, `source`, `affiliate`, `partner`, `promo`, `tracking_id`, `trk`, ... |
+A modular Discord bot with hybrid prefix/slash commands, server-specific plugin controls, locally generated help, AI features, games, utilities, activity tracking, and self-hosted voice music.
 
 ## Setup
 
-### 1. Create a Discord Application & Bot
+1. Install Python 3.11 or newer and Node.js.
+2. Create and activate a virtual environment.
+3. Install runtime dependencies:
 
-1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-2. Click **New Application** → give it a name
-3. Go to **Bot** → click **Add Bot**
-4. Under **Privileged Gateway Intents**, enable **Message Content Intent**
-5. Copy your bot token
+   ```powershell
+   python -m pip install -r requirements.txt
+   ```
 
-### 2. Invite the Bot
+4. Copy `.env.example` to `.env` and set `DISCORD_TOKEN`.
+5. Enable Message Content and Server Members intents in the Discord Developer Portal.
+6. Invite the bot with the `bot` and `applications.commands` scopes. Music also needs Connect and Speak permissions.
+7. Start the bot:
 
-In the Developer Portal, go to **OAuth2 → URL Generator**:
-- Scopes: `bot`, `applications.commands`
-- Bot permissions: `Send Messages`, `Read Message History`, `Embed Links`
+   ```powershell
+   python bot.py
+   ```
 
-Open the generated URL and invite the bot to your server.
+`imageio-ffmpeg` supplies a local FFmpeg binary by default. Set `FFMPEG_PATH` only when you want to use another FFmpeg executable.
 
-### 3. Install & Run
+## Help system
 
-```bash
-# Clone / download the project
-cd discord-link-cleaner
+Help is generated from documentation stored beside each command in its plugin.
 
-# Create a virtual environment (recommended)
-python -m venv .venv
-source .venv/bin/activate      # Linux/macOS
-# .venv\Scripts\activate       # Windows
+- `!help` — available plugin and command overview
+- `!help music` — plugin or command-group overview
+- `!help music play` — full usage, arguments, examples, and notes
+- `/help` — the same system through Discord slash commands
 
-# Install dependencies
-pip install -r requirements.txt
+Owner-only, unavailable, and server-disabled commands are filtered from normal help results.
 
-# Set up environment
-cp .env.example .env
-# Edit .env and paste your bot token
+## Music
 
-# Run the bot
-python bot.py
+Use `!music play <search or URL>` or `/music play` while connected to a voice channel. The bot joins automatically, queues the result, and posts an interactive now-playing embed.
+
+Supported inputs include:
+
+- YouTube videos and playlists
+- Spotify tracks, albums, and public playlists
+- SoundCloud, Bandcamp, Vimeo, Twitch, Mixcloud, and Dailymotion links supported by yt-dlp
+- Plain song searches
+
+Spotify links provide metadata only. The bot matches each item to a playable YouTube source; it does not download or decrypt Spotify audio.
+
+Controls and commands include pause/resume, skip, stop, disconnect, shuffle, track/queue looping, queue removal, clearing, and volume. Run `!music diagnostics` to check voice encryption, yt-dlp, Spotify metadata support, FFmpeg, and optional cookies.
+
+Music settings in `.env`:
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `MUSIC_DEFAULT_VOLUME` | `50` | Initial session volume, 0-100 |
+| `MUSIC_MAX_PLAYLIST` | `100` | Maximum entries accepted from one playlist |
+| `MUSIC_IDLE_TIMEOUT` | `180` | Seconds before an empty player disconnects |
+| `FFMPEG_PATH` | blank | Optional explicit FFmpeg executable |
+| `YTDLP_COOKIE_FILE` | blank | Optional private Netscape-format cookies file |
+
+## Plugin layout
+
+- `bot.py` — startup, persistence, plugin discovery, checks, and shared errors
+- `cogs/` — independently reloadable Discord plugins
+- `cogs/_help.py` — docstring parser and help renderer
+- `music/` — source resolution, queue/player state, and embed controls
+- `data/` — runtime data and SQLite settings
+- `tests/` — help and music regression checks
+
+Files whose names start with `_` are disabled plugins or internal helpers and are skipped during normal startup.
+
+## Validation
+
+Install development requirements and run:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-## Slash Commands
-
-All commands require **Manage Server** permission.
-
-| Command | Description |
-|---|---|
-| `/linkclean toggle` | Enable or disable the cleaner for this server |
-| `/linkclean ignore` | Toggle ignoring the current channel |
-| `/linkclean status` | Show current settings |
-| `/linkclean test <url>` | Preview what a URL looks like after cleaning |
-
-> **Note:** Slash commands sync automatically on first startup. If they don't appear, wait up to an hour for Discord to propagate them, or add a `await bot.tree.sync()` call in `on_ready` for instant global sync (can be rate-limited).
-
-## Project Structure
-
-```
-discord-link-cleaner/
-├── bot.py                  # Entry point, bot setup
-├── cogs/
-│   ├── __init__.py
-│   └── link_cleaner.py     # All the URL cleaning logic + event listener + slash commands
-├── requirements.txt
-├── .env.example
-└── README.md
-```
-
-## Persistence
-
-By default, server settings (enabled/disabled, ignored channels) are stored **in memory** and will reset on bot restart. To make them persistent, replace the `_guild_settings` dict in `link_cleaner.py` with a SQLite/JSON backend — the `get_settings()` function is the only integration point you'd need to change.
-
-## Running as a Service (Linux)
-
-```ini
-# /etc/systemd/system/link-cleaner-bot.service
-[Unit]
-Description=Discord Link Cleaner Bot
-After=network.target
-
-[Service]
-Type=simple
-User=youruser
-WorkingDirectory=/path/to/discord-link-cleaner
-ExecStart=/path/to/discord-link-cleaner/.venv/bin/python bot.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now link-cleaner-bot
-```
+The suite verifies that every plugin and command has local documentation, slash metadata is generated correctly, unsafe media URLs are rejected, queue operations are isolated, and FFmpeg is available.

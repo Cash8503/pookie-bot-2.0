@@ -5,10 +5,9 @@ import re
 from dataclasses import dataclass, replace
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -886,13 +885,19 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         except discord.HTTPException as e:
             log.warning("Typo tax notification failed: %s", e)
 
-    @helped_hybrid_group("typotax",
+    @documented_hybrid_group(
         name="typotax",
         invoke_without_command=True,
         case_insensitive=True,
     )
     @commands.guild_only()
     async def typotax(self, ctx: commands.Context):
+        """View typo debt and notification settings
+
+        Tracks typo debt, optional notifications, and repayment challenges.
+
+        Usage:
+            {prefix}typotax"""
         enabled = self._notifications_enabled(ctx.author.id)
         detector = "full English spellcheck" if self._spellchecker is not None else "common typo list only"
         category = self._preferred_category(ctx.author.id)
@@ -913,29 +918,59 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             f"Categories: {category_list}"
         )
 
-    @helped_command(typotax, "typotax optin", name="optin")
+    @documented_command(typotax, name="optin")
     @commands.guild_only()
     async def optin(self, ctx: commands.Context):
+        """Enable typo-tax notifications
+
+        Turns on replies when your messages are taxed.
+
+        Usage:
+            {prefix}typotax optin"""
         await self._set_notifications(ctx.author.id, True)
         await ctx.send("Typo tax notifications are now **on** for you.")
 
-    @helped_command(typotax, "typotax optout", name="optout")
+    @documented_command(typotax, name="optout")
     @commands.guild_only()
     async def optout(self, ctx: commands.Context):
+        """Disable typo-tax notifications
+
+        Turns off typo-tax replies while continuing to track your balance.
+
+        Usage:
+            {prefix}typotax optout"""
         await self._set_notifications(ctx.author.id, False)
         await ctx.send("Typo tax notifications are now **off** for you. Your balance will still be tracked.")
 
-    @helped_command(typotax, "typotax balance", name="balance")
+    @documented_command(typotax, name="balance")
     @commands.guild_only()
-    @app_commands.describe(member="Optional member to check")
     async def balance(self, ctx: commands.Context, member: discord.Member | None = None):
+        """Show typo-tax balance
+
+        Shows your balance or another member's balance.
+
+        Usage:
+            {prefix}typotax balance [member]
+
+        Arguments:
+            member: Optional member to check
+
+        Examples:
+            {prefix}typotax balance
+            {prefix}typotax balance @Cash"""
         target = member or ctx.author
         balance = self._balance(target.id)
         await ctx.send(f"**{target.display_name}** has a typo-tax balance of **{balance}**.")
 
-    @helped_command(typotax, "typotax leaderboard", name="leaderboard")
+    @documented_command(typotax, name="leaderboard")
     @commands.guild_only()
     async def leaderboard(self, ctx: commands.Context):
+        """Show typo-tax leaderboard
+
+        Lists members with the highest current typo-tax balances.
+
+        Usage:
+            {prefix}typotax leaderboard"""
         rows: list[tuple[int, int]] = []
         for user_id, namespaces in self.bot.settings._user_cache.items():
             balance = int(namespaces.get(NAMESPACE, {}).get("balance", 0) or 0)
@@ -954,13 +989,24 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             lines.append(f"{index}. **{discord.utils.escape_markdown(name)}** - {balance}")
         await ctx.send("**Typo Tax Leaderboard**\n" + "\n".join(lines))
 
-    @helped_command(typotax, "typotax repay", name="repay")
+    @documented_command(typotax, name="repay")
     @commands.guild_only()
-    @app_commands.describe(
-        category="math, grammar, trivia, spelling, linguistics, or random",
-        stake="1-5. Higher stakes repay more but risk more.",
-    )
     async def repay(self, ctx: commands.Context, category: str | None = None, stake: int | None = None):
+        """Repay typo-tax debt
+
+        Starts a repayment challenge. Higher stakes ask harder questions, repay more points, and risk more on misses.
+
+        Usage:
+            {prefix}typotax repay [category] [stake]
+
+        Arguments:
+            category: math, grammar, trivia, spelling, linguistics, or random
+            stake: 1-5. Higher stakes repay more but risk more.
+
+        Examples:
+            {prefix}typotax repay
+            {prefix}typotax repay grammar 3
+            {prefix}typotax repay random 5"""
         category_key = _normalize_category(category) if category else None
         if category and category_key is None:
             await ctx.send(
@@ -976,10 +1022,22 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
 
         await self.start_repayment_from_context(ctx, category_key=category_key, stake=resolved_stake)
 
-    @helped_command(typotax, "typotax category", name="category")
+    @documented_command(typotax, name="category")
     @commands.guild_only()
-    @app_commands.describe(category="math, grammar, trivia, spelling, linguistics, or random")
     async def category(self, ctx: commands.Context, category: str | None = None):
+        """Set repayment category
+
+        Shows or changes your default typo-tax repayment category.
+
+        Usage:
+            {prefix}typotax category [category]
+
+        Arguments:
+            category: math, grammar, trivia, spelling, linguistics, or random
+
+        Examples:
+            {prefix}typotax category
+            {prefix}typotax category trivia"""
         current = self._preferred_category(ctx.author.id)
         if category is None:
             await ctx.send(
@@ -999,10 +1057,22 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_preferred_category(ctx.author.id, category_key)
         await ctx.send(f"Default typo-tax category set to **{CATEGORY_LABELS[category_key]}**.")
 
-    @helped_command(typotax, "typotax stake", name="stake")
+    @documented_command(typotax, name="stake")
     @commands.guild_only()
-    @app_commands.describe(stake="1-5. Higher stakes repay more but risk more.")
     async def stake(self, ctx: commands.Context, stake: int | None = None):
+        """Set repayment stakes
+
+        Shows or changes your default typo-tax stakes from 1x to 5x.
+
+        Usage:
+            {prefix}typotax stake [1-5]
+
+        Arguments:
+            stake: 1-5. Higher stakes repay more but risk more.
+
+        Examples:
+            {prefix}typotax stake
+            {prefix}typotax stake 3"""
         current = self._preferred_stake(ctx.author.id)
         if stake is None:
             await ctx.send(f"Your default typo-tax stakes are **{current}x**.")
@@ -1019,11 +1089,24 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_preferred_stake(ctx.author.id, resolved)
         await ctx.send(f"Default typo-tax stakes set to **{resolved}x**.")
 
-    @helped_command(typotax, "typotax forgive", name="forgive")
+    @documented_command(typotax, name="forgive")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
-    @app_commands.describe(member="Member whose debt should be reduced", amount="Amount to forgive")
     async def forgive(self, ctx: commands.Context, member: discord.Member, amount: int = 1):
+        """Forgive typo-tax debt
+
+        Reduces a member's typo-tax balance. Requires Manage Messages.
+
+        Usage:
+            {prefix}typotax forgive <member> [amount]
+
+        Arguments:
+            member: Member whose debt should be reduced
+            amount: Amount to forgive
+
+        Examples:
+            {prefix}typotax forgive @Cash
+            {prefix}typotax forgive @Cash 3"""
         if amount < 1:
             await ctx.send("Amount must be at least 1.")
             return

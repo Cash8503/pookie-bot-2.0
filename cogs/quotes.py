@@ -26,10 +26,9 @@ import re
 from datetime import datetime, timezone
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 
 log = logging.getLogger(__name__)
 
@@ -128,12 +127,23 @@ class QuotesCog(commands.Cog, name="Quotes"):
     #  Root command — !quote [context_spec]
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("quote",
+    @documented_hybrid_group(
         name="quote",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def quote(self, ctx: commands.Context, *, args: str = None):
+        """Save a message to the quotebook
+
+        Reply to a message with this command to save it to the configured quote channel.
+
+        Usage:
+            {prefix}quote [context]
+
+        Examples:
+            {prefix}quote
+            {prefix}quote 4
+            {prefix}quote 1-3,5"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -257,10 +267,16 @@ class QuotesCog(commands.Cog, name="Quotes"):
     #  !quote random
     # ------------------------------------------------------------------ #
 
-    @helped_command(quote, "quote random",
+    @documented_command(quote,
         name="random",
     )
     async def quote_random(self, ctx: commands.Context):
+        """Show a random saved quote
+
+        Displays a random quote from this server's quotebook.
+
+        Usage:
+            {prefix}quote random"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return

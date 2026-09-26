@@ -1,47 +1,57 @@
 # Pookie Bot Command Rules
 
-These rules are not optional. Every command in every active cog must follow this structure.
+These rules apply to every user-facing command in every plugin.
 
-## Command Structure
+## Command structure
 
-- Every user-facing command must be a hybrid command or a subcommand of a hybrid group.
-- Every command must have a `CommandHelp` entry in `cogs/_help.py`.
-- Command metadata must be centralized in `HELP_CONTENT`; do not make decorator `brief` or `help` text the source of truth.
-- Use the helper decorators from `cogs._help`:
-  - `helped_hybrid_command("command")`
-  - `helped_hybrid_group("group")`
-  - `helped_bot_hybrid_command(bot, "command")` for bot-level commands
-  - `helped_command(parent_group, "group command")`
-  - `helped_group(parent_group, "group subgroup")`
-- Required arguments must not fail silently or only log. Missing required arguments must show the generated help embed for that command.
-- The root of a command group must show a useful overview when called with no subcommand.
-- Slash command descriptions must come from the same `CommandHelp.brief` text as prefix help.
-- Any new command must compile and pass the command metadata validation before it is considered done.
+- Commands must be hybrid commands or subcommands of a hybrid group.
+- Help belongs beside the command in its function docstring. Do not add a central help registry.
+- Use the documented decorators from `cogs._help`:
+  - `documented_hybrid_command()`
+  - `documented_hybrid_group()`
+  - `documented_bot_hybrid_command(bot)` for bot-level commands
+  - `documented_command(parent_group)`
+  - `documented_group(parent_group)`
+- Cog class docstrings describe the plugin for `!help <plugin>`.
+- Menu-only group roots call `send_command_help(ctx)` rather than maintaining a second command list.
+- Required arguments and invalid values must return generated command help instead of failing silently.
+- Slash descriptions and prefix help come from the same local docstring.
 
-## Required CommandHelp Shape
+## Command help format
 
-Each entry should define:
+The first line is the short command description. The next paragraph is detailed help. Optional sections are `Usage`, `Arguments`, `Examples`, and `Notes`.
 
 ```python
-CommandHelp(
-    brief="One short sentence for command lists and slash descriptions.",
-    description="The full help text for detailed help embeds.",
-    usage="{prefix}command <required> [optional]",
-    examples=("{prefix}command example",),
-    notes=("Important constraints or permissions.",),
-    subcommands=("{prefix}group subcommand",),
-)
+@documented_command(example, name="search")
+async def search(self, ctx: commands.Context, *, query: str):
+    """Search for an example
+
+    Searches the configured provider and displays the best result.
+
+    Usage:
+        {prefix}example search <query>
+
+    Arguments:
+        query: Words or URL to search for.
+
+    Examples:
+        {prefix}example search hello world
+
+    Notes:
+        Requires access to the configured provider.
+    """
 ```
 
-Use only the fields that make sense, but `brief`, `description`, and `usage` are expected for all normal commands.
+`Arguments` names must exactly match callback parameter names. They become slash-command parameter descriptions automatically. Use `{prefix}` instead of hardcoding `!`.
 
 ## Validation
 
 Run these checks after command changes:
 
 ```powershell
-$files = @('bot.py') + (Get-ChildItem -Path .\cogs -Recurse -Filter *.py | ForEach-Object { $_.FullName })
-python -m py_compile @files
+$files = @('bot.py') + @(Get-ChildItem -Path .\cogs, .\music, .\tests -Recurse -Filter *.py | ForEach-Object { $_.FullName })
+.\.venv\Scripts\python.exe -m py_compile $files
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The bot also runs metadata validation at startup and after cog hot-reloads.
+The bot also validates local help metadata at startup and after plugin hot-reloads.

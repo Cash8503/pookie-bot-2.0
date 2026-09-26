@@ -11,8 +11,12 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from cogs._help import (
-    apply_help_content,
-    helped_bot_hybrid_command,
+    apply_documented_help,
+    build_plugin_help_embed,
+    cog_is_visible,
+    command_is_visible,
+    documented_bot_hybrid_command,
+    find_cog,
     send_bot_help,
     send_command_help,
     validate_hybrid_commands,
@@ -262,17 +266,39 @@ _sync_task   = None
 _file_mtimes: dict[str, float] = {}
 
 
-@helped_bot_hybrid_command(bot, "help", name="help")
+@documented_bot_hybrid_command(bot, name="help")
 async def help_command(ctx: commands.Context, *, command: str | None = None):
+    """Show bot or command help
+
+    Shows the command overview, or detailed help for one command.
+
+    Usage:
+        {prefix}help [command]
+
+    Arguments:
+        command: Command path or plugin name to explain.
+
+    Examples:
+        {prefix}help
+        {prefix}help ow whois
+        {prefix}help typotax repay"""
     if not command:
         await send_bot_help(ctx, bot)
         return
 
-    target = bot.get_command(command.strip().lower())
-    if target is None:
-        await ctx.send(f"No command named `{command}` was found.", ephemeral=True)
+    topic = command.strip()
+    target = bot.get_command(topic.lower())
+    if target is not None and await command_is_visible(target, ctx):
+        await send_command_help(ctx, target)
         return
-    await send_command_help(ctx, target)
+
+    cog = find_cog(bot, topic)
+    if cog is not None:
+        if await cog_is_visible(cog, ctx):
+            await ctx.send(embed=await build_plugin_help_embed(cog, ctx), ephemeral=True)
+            return
+
+    await ctx.send(f"No available command or plugin named `{topic}` was found.", ephemeral=True)
 
 
 @bot.check
@@ -315,13 +341,16 @@ bot.tree.interaction_check = guild_cog_enabled_interaction_check
 
 
 def refresh_command_metadata() -> None:
-    """Apply centralized command help and warn if commands drift from policy."""
-    missing = apply_help_content(bot)
+    """Apply command-local help docs and warn if commands drift from policy."""
+    missing = apply_documented_help(bot)
     non_hybrid = validate_hybrid_commands(bot)
     if missing:
         log.warning("Command help metadata is missing for %d command(s).", len(missing))
     if non_hybrid:
         log.warning("Found %d non-hybrid command(s).", len(non_hybrid))
+
+
+bot.refresh_command_metadata = refresh_command_metadata
 
 
 async def periodic_flush():
@@ -407,11 +436,31 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
-    if isinstance(error, commands.MissingRequiredArgument):
+    if isinstance(
+        error,
+        (
+            commands.MissingRequiredArgument,
+            commands.BadArgument,
+            commands.TooManyArguments,
+            commands.BadLiteralArgument,
+        ),
+    ):
         await send_command_help(ctx, error=error)
         return
     if isinstance(error, GuildCogDisabled):
         await ctx.send(str(error), ephemeral=True)
+        return
+    if isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("That command can only be used in a server.", ephemeral=True)
+        return
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("That command is restricted to the bot owner.", ephemeral=True)
+        return
+    if isinstance(error, (commands.MissingPermissions, commands.BotMissingPermissions)):
+        await ctx.send(str(error), ephemeral=True)
+        return
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send(str(error) or "You cannot use that command here.", ephemeral=True)
         return
     log.error(f"Command error in {ctx.command}: {error}")
 

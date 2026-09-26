@@ -26,10 +26,9 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -317,28 +316,38 @@ class ActivityCog(commands.Cog, name="Activity"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("activity",
+    @documented_hybrid_group(
         name="activity",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def activity(self, ctx: commands.Context):
-        await ctx.send(
-            "**Activity Commands**\n"
-            "`!activity summary [all]` — Top 10 snapshot of all categories\n"
-            "`!activity leaderboard [all]` — Top 10 this month (or all time)\n"
-            "`!activity stats [@member]` — Individual stats\n"
-            "`!activity emojis [all]` — Most used emojis (or all time)\n"
-            "`!activity emoji <emoji> [all]` — Who uses a specific emoji the most\n\n"
-            "Run `!help activity <subcommand>` for details."
-        )
+        """Server activity stats and leaderboards
 
-    @helped_command(activity, "activity leaderboard",
+        Track messages, voice time, and emoji usage for this server.
+
+        Usage:
+            {prefix}activity"""
+        await send_command_help(ctx)
+
+    @documented_command(activity,
         name="leaderboard",
         aliases=["top"],
     )
-    @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def leaderboard(self, ctx: commands.Context, period: str = "month"):
+        """Show the most active members
+
+        Ranks members by activity score for this month or all time.
+
+        Usage:
+            {prefix}activity leaderboard [all]
+
+        Arguments:
+            period: 'all' for lifetime stats, leave blank for this month
+
+        Examples:
+            {prefix}activity leaderboard
+            {prefix}activity leaderboard all"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -403,11 +412,23 @@ class ActivityCog(commands.Cog, name="Activity"):
         view   = _LeaderboardPaginator(lines, title, footer)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @helped_command(activity, "activity stats",
+    @documented_command(activity,
         name="stats",
     )
-    @app_commands.describe(member="Member to check (leave blank for yourself)")
     async def stats(self, ctx: commands.Context, member: discord.Member = None):
+        """Show activity stats for one member
+
+        Shows message, voice, emoji, and score totals for a member.
+
+        Usage:
+            {prefix}activity stats [member]
+
+        Arguments:
+            member: Member to check (leave blank for yourself)
+
+        Examples:
+            {prefix}activity stats
+            {prefix}activity stats @Cash"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -465,11 +486,23 @@ class ActivityCog(commands.Cog, name="Activity"):
         embed.set_thumbnail(url=target.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @helped_command(activity, "activity emojis",
+    @documented_command(activity,
         name="emojis",
     )
-    @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def emojis(self, ctx: commands.Context, period: str = "month"):
+        """Show the most used emojis
+
+        Lists the most used custom and Unicode emojis this month or all time.
+
+        Usage:
+            {prefix}activity emojis [all]
+
+        Arguments:
+            period: 'all' for lifetime stats, leave blank for this month
+
+        Examples:
+            {prefix}activity emojis
+            {prefix}activity emojis all"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -500,11 +533,24 @@ class ActivityCog(commands.Cog, name="Activity"):
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
 
-    @helped_command(activity, "activity emoji",
+    @documented_command(activity,
         name="emoji",
     )
-    @app_commands.describe(emoji="The emoji to look up", period="'all' for lifetime, blank for this month")
     async def emoji_who(self, ctx: commands.Context, emoji: str, period: str = "month"):
+        """Show who uses an emoji most
+
+        Ranks members by usage count for one emoji.
+
+        Usage:
+            {prefix}activity emoji <emoji> [all]
+
+        Arguments:
+            emoji: The emoji to look up
+            period: 'all' for lifetime, blank for this month
+
+        Examples:
+            {prefix}activity emoji :pookie:
+            {prefix}activity emoji :pookie: all"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -564,11 +610,23 @@ class ActivityCog(commands.Cog, name="Activity"):
         view  = _LeaderboardPaginator(lines, title)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @helped_command(activity, "activity summary",
+    @documented_command(activity,
         name="summary",
     )
-    @app_commands.describe(period="'all' for lifetime stats, leave blank for this month")
     async def summary(self, ctx: commands.Context, period: str = "month"):
+        """Show activity category leaders
+
+        Shows top members for messages, voice time, emoji usage, and most-used emojis.
+
+        Usage:
+            {prefix}activity summary [all]
+
+        Arguments:
+            period: 'all' for lifetime stats, leave blank for this month
+
+        Examples:
+            {prefix}activity summary
+            {prefix}activity summary all"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -633,11 +691,24 @@ class ActivityCog(commands.Cog, name="Activity"):
 
         await ctx.send(embed=embed)
 
-    @helped_command(activity, "activity backfill",
+    @documented_command(activity,
         name="backfill",
     )
     @commands.has_permissions(manage_guild=True)
     async def backfill(self, ctx: commands.Context, confirm: str = ""):
+        """Rebuild activity stats from history
+
+        Scans channel history and replaces stored activity data. Requires Manage Server.
+
+        Usage:
+            {prefix}activity backfill confirm
+
+        Examples:
+            {prefix}activity backfill
+            {prefix}activity backfill confirm
+
+        Notes:
+            This can take a long time on active servers."""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return

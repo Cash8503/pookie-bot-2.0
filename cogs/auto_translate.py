@@ -22,7 +22,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -302,13 +302,19 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
 
     # ── Commands ───────────────────────────────────────────────────────────────
 
-    @helped_hybrid_group("translate",
+    @documented_hybrid_group(
         name="translate",
         invoke_without_command=True,
         case_insensitive=True,
     )
     @commands.guild_only()
     async def translate_group(self, ctx: commands.Context):
+        """Show or change translation settings
+
+        Auto-translates non-English messages using Google Translate or Claude.
+
+        Usage:
+            {prefix}translate"""
         assert ctx.guild is not None
         mode      = self._mode(ctx.guild.id)
         provider  = self._provider(ctx.guild.id)
@@ -324,10 +330,20 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
             "`!translate lang <code>` — set target language, e.g. `en`, `es`, `ja`"
         )
 
-    @helped_command(translate_group, "translate mode", name="mode")
+    @documented_command(translate_group, name="mode")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_mode(self, ctx: commands.Context, mode: str):
+        """Set translation display mode
+
+        Choose a shared live embed or individual replies per translated message.
+
+        Usage:
+            {prefix}translate mode <live|individual>
+
+        Examples:
+            {prefix}translate mode live
+            {prefix}translate mode individual"""
         assert ctx.guild is not None
         mode = mode.lower()
         if mode not in ("live", "individual"):
@@ -343,10 +359,20 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
                 self._sessions.pop(cid, None)
         await ctx.send(f"✅ Translation mode set to **{mode}**.")
 
-    @helped_command(translate_group, "translate provider", name="provider")
+    @documented_command(translate_group, name="provider")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_provider(self, ctx: commands.Context, provider: str):
+        """Set translation provider
+
+        Choose Google Translate or Claude for auto-translation.
+
+        Usage:
+            {prefix}translate provider <google|claude>
+
+        Examples:
+            {prefix}translate provider google
+            {prefix}translate provider claude"""
         assert ctx.guild is not None
         provider = provider.lower()
         if provider not in ("claude", "google"):
@@ -358,10 +384,20 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         await self.bot.settings.set(ctx.guild.id, "auto_translate", "provider", provider)
         await ctx.send(f"✅ Translation provider set to **{provider}**.")
 
-    @helped_command(translate_group, "translate lang", name="lang")
+    @documented_command(translate_group, name="lang")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_lang(self, ctx: commands.Context, code: str):
+        """Set translation target language
+
+        Sets the target language code for auto-translation.
+
+        Usage:
+            {prefix}translate lang <code>
+
+        Examples:
+            {prefix}translate lang en
+            {prefix}translate lang es"""
         assert ctx.guild is not None
         code      = code.lower().strip()
         lang_name = _LANG_NAMES.get(code, code.upper())

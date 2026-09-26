@@ -28,10 +28,9 @@ import time
 
 import aiohttp
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 log = logging.getLogger("ow_picker")
 
@@ -607,33 +606,42 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("ow",
+    @documented_hybrid_group(
         name="ow",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def ow(self, ctx: commands.Context):
-        await ctx.send(
-            "**Overwatch Commands**\n"
-            "`!ow qp [count]`            — Quickplay 2-2-2 (VC recommended)\n"
-            "`!ow stadium [count]`       — Stadium role-queue (VC recommended)\n"
-            "`!ow link [member] <tag>`   — Link a battletag to your account\n"
-            "`!ow unlink [member]`       — Unlink a battletag\n"
-            "`!ow stats [member]`        — Show career stats for a linked account\n"
-            "`!ow whois <query>`         — Look up any player by name or battletag\n"
-            "`!ow linked`               — List all linked battletags in this server\n\n"
-            "Run `!help ow <subcommand>` for full details."
-        )
+        """Overwatch hero picker and profile tools
+
+        Pick heroes for modes, link battletags, and fetch public profile stats.
+
+        Usage:
+            {prefix}ow"""
+        await send_command_help(ctx)
 
     # ------------------------------------------------------------------ #
     #  QP subcommand
     # ------------------------------------------------------------------ #
 
-    @helped_command(ow, "ow qp",
+    @documented_command(ow,
         name="qp",
     )
-    @app_commands.describe(count="Players total (6), by role (2-2-2 or 222), or omit if in a VC")
     async def ow_qp(self, ctx: commands.Context, count: str | None = None):
+        """Pick Quickplay heroes
+
+        Randomly assigns Quickplay heroes using role counts or your voice channel.
+
+        Usage:
+            {prefix}ow qp [count|T-D-S|TDS]
+
+        Arguments:
+            count: Players total (6), by role (2-2-2 or 222), or omit if in a VC
+
+        Examples:
+            {prefix}ow qp 6
+            {prefix}ow qp 222
+            {prefix}ow qp 2-2-2"""
         async with ctx.typing():
             vc_members: list[discord.Member] | None = None
             explicit_slots: dict[str, int] | None = None
@@ -696,11 +704,24 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Stadium subcommand
     # ------------------------------------------------------------------ #
 
-    @helped_command(ow, "ow stadium",
+    @documented_command(ow,
         name="stadium",
     )
-    @app_commands.describe(count="Players total (5), by role (1-2-2 or 122), or omit if in a VC")
     async def ow_stadium(self, ctx: commands.Context, count: str | None = None):
+        """Pick Stadium heroes
+
+        Runs an interactive role picker from voice chat or uses explicit role counts.
+
+        Usage:
+            {prefix}ow stadium [count|T-D-S|TDS]
+
+        Arguments:
+            count: Players total (5), by role (1-2-2 or 122), or omit if in a VC
+
+        Examples:
+            {prefix}ow stadium
+            {prefix}ow stadium 5
+            {prefix}ow stadium 1-2-2"""
         voice_state = ctx.author.voice
         in_vc = voice_state and voice_state.channel
 
@@ -780,14 +801,24 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Link / Unlink / Stats subcommands
     # ------------------------------------------------------------------ #
 
-    @helped_command(ow, "ow link",
+    @documented_command(ow,
         name="link",
     )
-    @app_commands.describe(
-        member="Member to link (leave blank to link yourself)",
-        battletag="Overwatch battletag, e.g. Name#1234",
-    )
     async def ow_link(self, ctx: commands.Context, member: discord.Member | None = None, *, battletag: str):
+        """Link an Overwatch battletag
+
+        Links a battletag to you, or to another member if the bot owner runs it.
+
+        Usage:
+            {prefix}ow link [member] <Name#1234>
+
+        Arguments:
+            member: Member to link (leave blank to link yourself)
+            battletag: Overwatch battletag, e.g. Name#1234
+
+        Examples:
+            {prefix}ow link CoolPlayer#1234
+            {prefix}ow link @Cash CoolPlayer#1234"""
         target = member or ctx.author
 
         if target != ctx.author and not await self.bot.is_owner(ctx.author):
@@ -820,11 +851,23 @@ class OWPicker(commands.Cog, name="Overwatch"):
                 ephemeral=True,
             )
 
-    @helped_command(ow, "ow unlink",
+    @documented_command(ow,
         name="unlink",
     )
-    @app_commands.describe(member="Member to unlink (leave blank to unlink yourself)")
     async def ow_unlink(self, ctx: commands.Context, member: discord.Member | None = None):
+        """Unlink an Overwatch battletag
+
+        Removes your linked battletag, or another member's if the bot owner runs it.
+
+        Usage:
+            {prefix}ow unlink [member]
+
+        Arguments:
+            member: Member to unlink (leave blank to unlink yourself)
+
+        Examples:
+            {prefix}ow unlink
+            {prefix}ow unlink @Cash"""
         target = member or ctx.author
 
         if target != ctx.author and not await self.bot.is_owner(ctx.author):
@@ -852,10 +895,16 @@ class OWPicker(commands.Cog, name="Overwatch"):
         else:
             await ctx.send(f"✅ Your battletag (**{existing}**) has been unlinked.", ephemeral=True)
 
-    @helped_command(ow, "ow linked",
+    @documented_command(ow,
         name="linked",
     )
     async def ow_linked(self, ctx: commands.Context):
+        """List linked Overwatch accounts
+
+        Shows every member in this server with a linked battletag.
+
+        Usage:
+            {prefix}ow linked"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -878,11 +927,23 @@ class OWPicker(commands.Cog, name="Overwatch"):
         lines = "\n".join(f"**{name}** — `{tag}`" for name, tag in rows)
         await ctx.send(f"🎮 **Linked Overwatch Accounts** ({len(rows)})\n\n{lines}")
 
-    @helped_command(ow, "ow stats",
+    @documented_command(ow,
         name="stats",
     )
-    @app_commands.describe(user="Server member to look up (uses their linked battletag)")
     async def ow_stats(self, ctx: commands.Context, user: discord.Member | None = None):
+        """Show linked Overwatch stats
+
+        Fetches ranks, time played, win rate, and top heroes for a linked profile.
+
+        Usage:
+            {prefix}ow stats [member]
+
+        Arguments:
+            user: Server member to look up (uses their linked battletag)
+
+        Examples:
+            {prefix}ow stats
+            {prefix}ow stats @Cash"""
         member = user or ctx.author
         battletag = self.bot.settings.get_user(member.id, "ow", "battletag")
 
@@ -916,11 +977,23 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Whois subcommand
     # ------------------------------------------------------------------ #
 
-    @helped_command(ow, "ow whois",
+    @documented_command(ow,
         name="whois",
     )
-    @app_commands.describe(query="Full battletag (Name#1234) or partial name to search")
     async def ow_whois(self, ctx: commands.Context, *, query: str):
+        """Search any Overwatch profile
+
+        Looks up a player by battletag or partial name without requiring a Discord link.
+
+        Usage:
+            {prefix}ow whois <query>
+
+        Arguments:
+            query: Full battletag (Name#1234) or partial name to search
+
+        Examples:
+            {prefix}ow whois CoolPlayer#1234
+            {prefix}ow whois CoolPlayer"""
         query = query.strip()
 
         async with ctx.typing():

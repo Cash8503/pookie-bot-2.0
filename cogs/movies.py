@@ -5,7 +5,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 
 log = logging.getLogger(__name__)
 
@@ -263,12 +263,22 @@ class MoviesCog(commands.Cog, name="Movies"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("movie",
+    @documented_hybrid_group(
         name="movie",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def movie(self, ctx: commands.Context, *, query: str = None):
+        """Look up movies and where to watch
+
+        Searches TMDB and shows ratings, metadata, and US streaming availability.
+
+        Usage:
+            {prefix}movie <title>
+
+        Examples:
+            {prefix}movie Alien
+            {prefix}movie genre horror"""
         if not query:
             await ctx.send(
                 "**Movies**\n"
@@ -311,10 +321,20 @@ class MoviesCog(commands.Cog, name="Movies"):
             view = WrongMovieView(results, session, tmdb_key, omdb_key)
             await ctx.send(embed=embed, view=view)
 
-    @helped_command(movie, "movie genre",
+    @documented_command(movie,
         name="genre",
     )
     async def movie_genre(self, ctx: commands.Context, *, genre: str):
+        """Browse popular movies by genre
+
+        Shows popular movies in a genre and lets you choose one for details.
+
+        Usage:
+            {prefix}movie genre <name>
+
+        Examples:
+            {prefix}movie genre action
+            {prefix}movie genre sci-fi"""
         tmdb_key = os.getenv("TMDB_API_KEY")
         if not tmdb_key:
             await ctx.send("❌ `TMDB_API_KEY` is not set.", ephemeral=True)

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord.ext import commands, tasks
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -164,27 +164,35 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("birthday",
+    @documented_hybrid_group(
         name="birthday",
         aliases=["birthdays"],
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def birthday(self, ctx: commands.Context):
-        await ctx.send(
-            "**Birthdays**\n"
-            "`!birthday set <date>` — Set your birthday (e.g. `March 25`, `3/25`, `03-25`)\n"
-            "`!birthday remove` — Remove your birthday\n"
-            "`!birthday list` — List all birthdays in this server\n"
-            "`!birthday setchannel <#channel>` — Set announcement channel (owner only)\n"
-            "`!birthday announce [time]` — Trigger now or at a time, e.g. `9am` or `15:30` UTC (owner only)\n\n"
-            "Run `!help birthday <subcommand>` for more details."
-        )
+        """Track and announce birthdays
 
-    @helped_command(birthday, "birthday set",
+        Store birthdays and post daily announcements to a configured channel.
+
+        Usage:
+            {prefix}birthday"""
+        await send_command_help(ctx)
+
+    @documented_command(birthday,
         name="set",
     )
     async def birthday_set(self, ctx: commands.Context, *, date: str):
+        """Set your birthday
+
+        Stores your month and day. The year is ignored.
+
+        Usage:
+            {prefix}birthday set <date>
+
+        Examples:
+            {prefix}birthday set 03-25
+            {prefix}birthday set March 25"""
         dt = _parse_birthday(date)
         if dt is None:
             await ctx.send(
@@ -198,20 +206,32 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         pretty = dt.strftime("%B %d")
         await ctx.send(f"🎂 Birthday set to **{pretty}**!", ephemeral=True)
 
-    @helped_command(birthday, "birthday remove",
+    @documented_command(birthday,
         name="remove",
     )
     async def birthday_remove(self, ctx: commands.Context):
+        """Remove your birthday
+
+        Deletes your stored birthday.
+
+        Usage:
+            {prefix}birthday remove"""
         if not self.bot.settings.get_user(ctx.author.id, "birthdays", "date"):
             await ctx.send("❌ You don't have a birthday set.", ephemeral=True)
             return
         await self.bot.settings.delete_user(ctx.author.id, "birthdays", "date")
         await ctx.send("✅ Your birthday has been removed.", ephemeral=True)
 
-    @helped_command(birthday, "birthday list",
+    @documented_command(birthday,
         name="list",
     )
     async def birthday_list(self, ctx: commands.Context):
+        """List server birthdays
+
+        Shows members with birthdays sorted by soonest upcoming.
+
+        Usage:
+            {prefix}birthday list"""
         if not ctx.guild:
             await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
             return
@@ -256,20 +276,40 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         )
         await ctx.send(embed=embed)
 
-    @helped_command(birthday, "birthday setchannel",
+    @documented_command(birthday,
         name="setchannel",
     )
     async def birthday_setchannel(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Set birthday announcement channel
+
+        Sets where birthday announcements are posted. Bot owner only.
+
+        Usage:
+            {prefix}birthday setchannel <channel>
+
+        Examples:
+            {prefix}birthday setchannel #birthdays"""
         if not await self.bot.is_owner(ctx.author):
             await ctx.send("❌ Only the bot owner can set the birthday channel.", ephemeral=True)
             return
         await self.bot.settings.set(ctx.guild.id, "birthdays", "channel", channel.id)
         await ctx.send(f"✅ Birthday announcements will post in {channel.mention}.", ephemeral=True)
 
-    @helped_command(birthday, "birthday announce",
+    @documented_command(birthday,
         name="announce",
     )
     async def birthday_announce(self, ctx: commands.Context, *, time: str = ""):
+        """Trigger birthday announcements
+
+        Runs announcements now, for a date override, or schedules a UTC time.
+
+        Usage:
+            {prefix}birthday announce [time|MM-DD]
+
+        Examples:
+            {prefix}birthday announce
+            {prefix}birthday announce 04-04
+            {prefix}birthday announce 9am"""
         if not await self.bot.is_owner(ctx.author):
             await ctx.send("❌ Only the bot owner can use this command.", ephemeral=True)
             return

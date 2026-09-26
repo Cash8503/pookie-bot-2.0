@@ -18,6 +18,9 @@ data/data.db-wal
 data/data.db-shm
 data/data.db-journal
 data/*.bak*
+data/music-cache/
+cookies.txt
+*.cookies.txt
 
 # Docs
 *.md

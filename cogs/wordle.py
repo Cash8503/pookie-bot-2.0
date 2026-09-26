@@ -7,7 +7,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 from PIL import Image, ImageDraw, ImageFont
 
 log = logging.getLogger(__name__)
@@ -385,11 +385,17 @@ class WordleCog(commands.Cog, name="Wordle"):
     def cog_unload(self):
         log.info("Cog Unloaded.")
 
-    @helped_hybrid_group("wordle",
+    @documented_hybrid_group(
         name="wordle",
         invoke_without_command=True,
     )
     async def wordle(self, ctx: commands.Context):
+        """Play today's Wordle
+
+        Starts or resumes your personal daily Wordle board.
+
+        Usage:
+            {prefix}wordle"""
         today  = datetime.now(timezone.utc).date().isoformat()
         active = self.bot.settings.get_user(ctx.author.id, "wordle", "active")
 
@@ -410,9 +416,14 @@ class WordleCog(commands.Cog, name="Wordle"):
 
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @helped_command(wordle, "wordle reset", name="reset")
+    @documented_command(wordle, name="reset")
     async def wordle_reset(self, ctx: commands.Context):
-        """Abandon your current word and get a new one. Won't count against your stats."""
+        """Get a fresh Wordle word
+
+        Abandons your current word and starts another for today without affecting stats.
+
+        Usage:
+            {prefix}wordle reset"""
         today  = datetime.now(timezone.utc).date().isoformat()
         active = self.bot.settings.get_user(ctx.author.id, "wordle", "active") or {}
         gen    = (active.get("generation", 0) + 1) if active.get("date") == today else 0
@@ -426,9 +437,14 @@ class WordleCog(commands.Cog, name="Wordle"):
         view = WordleView(self.bot, ctx.author.id)
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @helped_command(wordle, "wordle stats", name="stats")
+    @documented_command(wordle, name="stats")
     async def wordle_stats(self, ctx: commands.Context):
-        """Show your lifetime Wordle stats."""
+        """Show your Wordle stats
+
+        Shows your lifetime Wordle record and guess distribution.
+
+        Usage:
+            {prefix}wordle stats"""
         stats = self.bot.settings.get_user(ctx.author.id, "wordle", "stats")
         if not stats or stats.get("played", 0) == 0:
             await ctx.send(f"No stats yet for **{ctx.author.display_name}** — finish a game first!")

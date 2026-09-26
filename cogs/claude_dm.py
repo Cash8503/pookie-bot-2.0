@@ -238,6 +238,8 @@ def _split(text: str) -> list[str]:
 class ClaudeDMCog(commands.Cog, name="ClaudeDM"):
     """DM the bot to make code changes via Claude. Bot owner only."""
 
+    help_hidden = True
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         api_key  = os.getenv("ANTHROPIC_API_KEY")

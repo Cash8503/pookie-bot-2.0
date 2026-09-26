@@ -4,7 +4,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 log = logging.getLogger(__name__)
 
@@ -60,27 +60,32 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
     #  Group root
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("db",
+    @documented_hybrid_group(
         name="db",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def db(self, ctx: commands.Context):
-        await ctx.send(
-            "**DB Admin** (owner only)\n"
-            "`!db tables`                                    — row counts\n"
-            "`!db get <guild|user> <id> [namespace] [key]`   — read\n"
-            "`!db set <guild|user> <id> <ns> <key> <value>`  — upsert\n"
-            "`!db del <guild|user> <id> <ns> <key>`          — delete row\n"
-            "`!db clear <guild|user> <id> [namespace]`       — delete all for ID\n"
-        )
+        """Inspect and edit settings rows
+
+        Owner-only database admin commands for guild and user settings.
+
+        Usage:
+            {prefix}db"""
+        await send_command_help(ctx)
 
     # ------------------------------------------------------------------ #
     #  Subcommands
     # ------------------------------------------------------------------ #
 
-    @helped_command(db, "db tables", name="tables")
+    @documented_command(db, name="tables")
     async def db_tables(self, ctx: commands.Context):
+        """Show settings row counts
+
+        Shows row counts for the guild and user settings tables.
+
+        Usage:
+            {prefix}db tables"""
         s = self.bot.settings
         guild_rows = sum(
             len(keys)
@@ -97,7 +102,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"`user_settings` (user) — **{user_rows}** row(s)"
         )
 
-    @helped_command(db, "db get",
+    @documented_command(db,
         name="get",
     )
     async def db_get(
@@ -108,6 +113,16 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         namespace: str = None,
         key: str = None,
     ):
+        """Read settings rows
+
+        Reads settings rows for a guild or user, optionally filtered by namespace and key.
+
+        Usage:
+            {prefix}db get <guild|user> <id> [namespace] [key]
+
+        Examples:
+            {prefix}db get user 123456789
+            {prefix}db get guild 987654321 link_cleaner"""
         guild = _is_guild(table)
         if guild is None:
             await ctx.send(f"❌ Unknown table `{table}`. Use `guild` or `user`.")
@@ -143,10 +158,19 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         for chunk in _paginate(header + "\n".join(rows)):
             await ctx.send(chunk)
 
-    @helped_command(db, "db find",
+    @documented_command(db,
         name="find",
     )
     async def db_find(self, ctx: commands.Context, entity_id: str):
+        """Search settings for an ID
+
+        Searches both guild and user settings tables for rows matching an ID.
+
+        Usage:
+            {prefix}db find <id>
+
+        Examples:
+            {prefix}db find @someone"""
         try:
             eid = _parse_id(entity_id)
         except ValueError:
@@ -174,7 +198,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         if not any_results:
             await ctx.send(f"No rows found for ID `{eid}` in any table.")
 
-    @helped_command(db, "db set",
+    @documented_command(db,
         name="set",
     )
     async def db_set(
@@ -187,6 +211,15 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         *,
         value: str,
     ):
+        """Set a settings value
+
+        Writes a JSON-parsed or plain-text value into guild or user settings.
+
+        Usage:
+            {prefix}db set <guild|user> <id> <namespace> <key> <value>
+
+        Examples:
+            {prefix}db set guild 987654321 link_cleaner enabled true"""
         guild = _is_guild(table)
         if guild is None:
             await ctx.send(f"❌ Unknown table `{table}`. Use `guild` or `user`.")
@@ -211,7 +244,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"✅ `{table_name}[{eid}].{namespace}.{key}` → `{json.dumps(parsed)}`"
         )
 
-    @helped_command(db, "db del",
+    @documented_command(db,
         name="del",
     )
     async def db_del(
@@ -222,6 +255,15 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         namespace: str,
         key: str,
     ):
+        """Delete one settings row
+
+        Deletes one settings row identified by ID, namespace, and key.
+
+        Usage:
+            {prefix}db del <guild|user> <id> <namespace> <key>
+
+        Examples:
+            {prefix}db del user 123456789 ow battletag"""
         guild = _is_guild(table)
         if guild is None:
             await ctx.send(f"❌ Unknown table `{table}`. Use `guild` or `user`.")
@@ -242,7 +284,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         table_name = "guild_settings" if guild else "user_settings"
         await ctx.send(f"✅ Deleted `{table_name}[{eid}].{namespace}.{key}`")
 
-    @helped_command(db, "db clear",
+    @documented_command(db,
         name="clear",
     )
     async def db_clear(
@@ -252,6 +294,16 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         entity_id: str,
         namespace: str = None,
     ):
+        """Clear settings rows
+
+        Deletes all settings for a guild or user, optionally scoped to one namespace.
+
+        Usage:
+            {prefix}db clear <guild|user> <id> [namespace]
+
+        Examples:
+            {prefix}db clear user 123456789
+            {prefix}db clear guild 987654321 link_cleaner"""
         guild = _is_guild(table)
         if guild is None:
             await ctx.send(f"❌ Unknown table `{table}`. Use `guild` or `user`.")

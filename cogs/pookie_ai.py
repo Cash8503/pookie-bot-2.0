@@ -10,6 +10,7 @@ from typing import List
 import discord
 from discord.ext import commands
 
+from cogs._help import documented_hybrid_command
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -164,9 +165,17 @@ class PookieAI(commands.Cog, name="PookieAI"):
         self._cooldowns[channel_id] = now
         return False
 
-    @commands.hybrid_command(name="pookie", brief="About Pookie")
+    @documented_hybrid_command(name="pookie")
     async def pookie_info(self, ctx: commands.Context):
-        """About Pookie."""
+        """About Pookie
+
+        Pookie is a locally running AI that lives in this server. Mention her (@Pookie) in any message and she'll reply based on the recent conversation. She reads up to the last 35 messages for context, and can see images posted in chat. She's not a bot, she swears.
+
+        Usage:
+            {prefix}pookie
+
+        Notes:
+            Use {prefix}resetcontext to clear her memory of the current channel."""
         embed = discord.Embed(
             title="About Pookie",
             description=(
@@ -183,9 +192,14 @@ class PookieAI(commands.Cog, name="PookieAI"):
         except TypeError:
             await ctx.send(embed=embed)
 
-    @commands.hybrid_command(name="resetcontext", brief="Clear Pookie's memory of this channel")
+    @documented_hybrid_command(name="resetcontext")
     async def reset_context(self, ctx: commands.Context):
-        """Marks this point in the channel so Pookie ignores all messages before it."""
+        """Clear Pookie's memory of this channel
+
+        Pookie is powered by a locally running AI model. She reads recent channel history as context before replying. This command marks a cutoff point — any messages before it will be excluded from her context window going forward.
+
+        Usage:
+            {prefix}resetcontext"""
         self._context_resets[ctx.channel.id] = ctx.message.id
         await ctx.send("context cleared.", ephemeral=True, delete_after=5)
 

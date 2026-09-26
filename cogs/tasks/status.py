@@ -31,7 +31,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 try:
     from anthropic import AsyncAnthropic as _AsyncAnthropic
@@ -237,22 +237,31 @@ class StatusCog(commands.Cog, name="Status"):
     #  Owner commands
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("status",
+    @documented_hybrid_group(
         name="status",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def status_group(self, ctx: commands.Context):
-        await ctx.send(
-            "**Status Commands** (owner only)\n"
-            "`!status refresh` — Manually regenerate statuses.txt via AI"
-        )
+        """Manage rotating bot statuses
 
-    @helped_command(status_group, "status refresh",
+        Owner-only commands for the bot presence rotation.
+
+        Usage:
+            {prefix}status"""
+        await send_command_help(ctx)
+
+    @documented_command(status_group,
         name="refresh",
     )
     @commands.is_owner()
     async def refresh(self, ctx: commands.Context):
+        """Regenerate status messages
+
+        Runs the AI status refresh and reloads the generated status list.
+
+        Usage:
+            {prefix}status refresh"""
         if not self._ai:
             await ctx.send("❌ Anthropic client is unavailable — check `ANTHROPIC_API_KEY`.")
             return

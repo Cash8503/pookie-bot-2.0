@@ -6,7 +6,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 
 log = logging.getLogger(__name__)
 
@@ -182,10 +182,20 @@ class TriviaCog(commands.Cog, name="Trivia"):
     #  Commands
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_command("trivia",
+    @documented_hybrid_command(
         name="trivia",
     )
     async def trivia(self, ctx: commands.Context, difficulty: str | None = None):
+        """Start a multiple-choice trivia round
+
+        Fetches a random Open Trivia DB question with clickable answer buttons.
+
+        Usage:
+            {prefix}trivia [easy|medium|hard]
+
+        Examples:
+            {prefix}trivia
+            {prefix}trivia hard"""
         params: dict = {"amount": 1, "type": "multiple"}
         if difficulty and difficulty.lower() in ("easy", "medium", "hard"):
             params["difficulty"] = difficulty.lower()

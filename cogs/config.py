@@ -2,10 +2,9 @@ import logging
 from urllib.parse import urlparse, parse_qs
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
 
 from cogs.link_cleaner import clean_url
 
@@ -28,13 +27,19 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Root — show full server config
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("config",
+    @documented_hybrid_group(
         name="config",
         invoke_without_command=True,
         case_insensitive=True,
     )
     @commands.has_permissions(manage_guild=True)
     async def config(self, ctx: commands.Context):
+        """View and manage server configuration
+
+        Manage channels and feature settings for this server. Requires Manage Server.
+
+        Usage:
+            {prefix}config"""
         s = self.bot.settings
         channel_id = s.get(ctx.guild.id, "rank_tracker", "channel")
         channel_str = f"<#{channel_id}>" if channel_id else "Not set"
@@ -56,12 +61,24 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Rank tracker channel
     # ------------------------------------------------------------------ #
 
-    @helped_command(config, "config ranktracker",
+    @documented_command(config,
         name="ranktracker",
     )
-    @app_commands.describe(channel_or_off="A #channel mention or ID, or 'off' to disable")
     @commands.has_permissions(manage_guild=True)
     async def config_ranktracker(self, ctx: commands.Context, *, channel_or_off: str):
+        """Set rank tracker channel
+
+        Sets or disables the rank tracker announcement channel.
+
+        Usage:
+            {prefix}config ranktracker <channel|off>
+
+        Arguments:
+            channel_or_off: A #channel mention or ID, or 'off' to disable
+
+        Examples:
+            {prefix}config ranktracker #rank-updates
+            {prefix}config ranktracker off"""
         if channel_or_off.strip().lower() == "off":
             await self.bot.settings.delete(ctx.guild.id, "rank_tracker", "channel")
             await ctx.send("📴 Rank tracker disabled.", ephemeral=True)
@@ -84,12 +101,24 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Quotebook channel
     # ------------------------------------------------------------------ #
 
-    @helped_command(config, "config quotebook",
+    @documented_command(config,
         name="quotebook",
     )
-    @app_commands.describe(channel_or_off="A #channel mention or ID, or 'off' to disable")
     @commands.has_permissions(manage_guild=True)
     async def config_quotebook(self, ctx: commands.Context, *, channel_or_off: str):
+        """Set quotebook channel
+
+        Sets or disables the channel where saved quotes are posted.
+
+        Usage:
+            {prefix}config quotebook <channel|off>
+
+        Arguments:
+            channel_or_off: A #channel mention or ID, or 'off' to disable
+
+        Examples:
+            {prefix}config quotebook #quotebook
+            {prefix}config quotebook off"""
         if channel_or_off.strip().lower() == "off":
             await self.bot.settings.delete(ctx.guild.id, "quotes", "channel")
             await ctx.send("📴 Quotebook channel disabled.", ephemeral=True)
@@ -112,13 +141,19 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Auto-translate sub-group
     # ------------------------------------------------------------------ #
 
-    @helped_group(config, "config translate",
+    @documented_group(config,
         name="translate",
         invoke_without_command=True,
         case_insensitive=True,
     )
     @commands.has_permissions(manage_guild=True)
     async def config_translate(self, ctx: commands.Context):
+        """Manage auto-translate config
+
+        Show or change server-level auto-translate settings.
+
+        Usage:
+            {prefix}config translate"""
         mode = self.bot.settings.get(ctx.guild.id, "auto_translate", "mode", "live")
         await ctx.send(
             f"🌐 Auto-translate mode: **{mode}**\n"
@@ -127,12 +162,24 @@ class ConfigCog(commands.Cog, name="Config"):
             ephemeral=True,
         )
 
-    @helped_command(config_translate, "config translate mode",
+    @documented_command(config_translate,
         name="mode",
     )
     @commands.has_permissions(manage_guild=True)
-    @app_commands.describe(mode="live or individual")
     async def config_translate_mode(self, ctx: commands.Context, mode: str):
+        """Set auto-translate mode
+
+        Choose live shared embeds or individual replies for translations.
+
+        Usage:
+            {prefix}config translate mode <live|individual>
+
+        Arguments:
+            mode: live or individual
+
+        Examples:
+            {prefix}config translate mode live
+            {prefix}config translate mode individual"""
         mode = mode.lower().strip()
         if mode not in ("live", "individual"):
             await ctx.send("❌ Valid modes: `live`, `individual`", ephemeral=True)
@@ -144,31 +191,49 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Link cleaner sub-group
     # ------------------------------------------------------------------ #
 
-    @helped_group(config, "config linkclean",
+    @documented_group(config,
         name="linkclean",
         invoke_without_command=True,
         case_insensitive=True,
     )
     @commands.has_permissions(manage_guild=True)
     async def config_linkclean(self, ctx: commands.Context):
+        """Manage link cleaner config
+
+        Enable, disable, ignore channels, and test URL cleanup.
+
+        Usage:
+            {prefix}config linkclean"""
         await ctx.invoke(self.config_linkclean_status)
 
-    @helped_command(config_linkclean, "config linkclean toggle",
+    @documented_command(config_linkclean,
         name="toggle",
     )
     @commands.has_permissions(manage_guild=True)
     async def config_linkclean_toggle(self, ctx: commands.Context):
+        """Toggle link cleaner
+
+        Turns the link cleaner on or off for this server.
+
+        Usage:
+            {prefix}config linkclean toggle"""
         current = self.bot.settings.get(ctx.guild.id, "link_cleaner", "enabled", True)
         new_val = not current
         await self.bot.settings.set(ctx.guild.id, "link_cleaner", "enabled", new_val)
         state = "**enabled** ✅" if new_val else "**disabled** ❌"
         await ctx.send(f"Link cleaner is now {state}.", ephemeral=True)
 
-    @helped_command(config_linkclean, "config linkclean ignore",
+    @documented_command(config_linkclean,
         name="ignore",
     )
     @commands.has_permissions(manage_guild=True)
     async def config_linkclean_ignore(self, ctx: commands.Context):
+        """Ignore or unignore this channel
+
+        Toggles whether link cleaning runs in the current channel.
+
+        Usage:
+            {prefix}config linkclean ignore"""
         cid = ctx.channel.id
         ignored = list(self.bot.settings.get(ctx.guild.id, "link_cleaner", "ignored_channels", []))
         if cid in ignored:
@@ -180,11 +245,17 @@ class ConfigCog(commands.Cog, name="Config"):
             await self.bot.settings.set(ctx.guild.id, "link_cleaner", "ignored_channels", ignored)
             await ctx.send(f"{ctx.channel.mention} is now ignored. ❌", ephemeral=True)
 
-    @helped_command(config_linkclean, "config linkclean status",
+    @documented_command(config_linkclean,
         name="status",
     )
     @commands.has_permissions(manage_guild=True)
     async def config_linkclean_status(self, ctx: commands.Context):
+        """Show link cleaner status
+
+        Shows whether link cleaning is enabled and which channels are ignored.
+
+        Usage:
+            {prefix}config linkclean status"""
         s = self.bot.settings
         state = "Enabled ✅" if s.get(ctx.guild.id, "link_cleaner", "enabled", True) else "Disabled ❌"
         ignored = ", ".join(
@@ -195,12 +266,23 @@ class ConfigCog(commands.Cog, name="Config"):
         embed.add_field(name="Ignored Channels", value=ignored, inline=False)
         await ctx.send(embed=embed, ephemeral=True)
 
-    @helped_command(config_linkclean, "config linkclean test",
+    @documented_command(config_linkclean,
         name="test",
     )
-    @app_commands.describe(url="The URL to preview")
     @commands.has_permissions(manage_guild=True)
     async def config_linkclean_test(self, ctx: commands.Context, *, url: str):
+        """Preview URL cleanup
+
+        Shows which tracking parameters would be stripped from a URL.
+
+        Usage:
+            {prefix}config linkclean test <url>
+
+        Arguments:
+            url: The URL to preview
+
+        Examples:
+            {prefix}config linkclean test https://example.com/?utm_source=x"""
         cleaned = clean_url(url)
         if cleaned == url:
             await ctx.send("✅ That URL is already clean — no tracking params found.", ephemeral=True)

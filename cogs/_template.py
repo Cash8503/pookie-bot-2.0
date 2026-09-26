@@ -1,13 +1,13 @@
 import logging
 from discord.ext import commands
 
-from cogs._help import helped_command, helped_group, helped_hybrid_command, helped_hybrid_group
+from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 log = logging.getLogger(__name__)
 
 
-# Add real command metadata to HELP_CONTENT in cogs/_help.py first.
-# The helped_* decorators require that entry and make it the source of truth.
+# Put command help in each callback docstring. The documented decorators parse
+# it for prefix help, slash descriptions, argument descriptions, and examples.
 
 
 class TemplateCog(commands.Cog, name="Template"):
@@ -26,22 +26,30 @@ class TemplateCog(commands.Cog, name="Template"):
     #  Example hybrid command group
     # ------------------------------------------------------------------ #
 
-    @helped_hybrid_group("template",
+    @documented_hybrid_group(
         name="template",
         invoke_without_command=True,
         case_insensitive=True,
     )
     async def template(self, ctx: commands.Context):
-        await ctx.send(
-            "**Template**\n"
-            "`!template example` — Does something\n\n"
-            "Run `!help template <subcommand>` for full details."
-        )
+        """Template command group
 
-    @helped_command(template, "template example",
+        Example command group for new cog scaffolding.
+
+        Usage:
+            {prefix}template"""
+        await send_command_help(ctx)
+
+    @documented_command(template,
         name="example",
     )
     async def example(self, ctx: commands.Context):
+        """Template example command
+
+        Example subcommand for new cog scaffolding.
+
+        Usage:
+            {prefix}template example"""
         await ctx.send("Hello from the template cog!")
 
 
