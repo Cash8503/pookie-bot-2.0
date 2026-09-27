@@ -4,7 +4,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
     #  Subcommands
     # ------------------------------------------------------------------ #
 
-    @documented_command(db, name="tables")
+    @documented_hybrid_subcommand(db, name="tables")
     async def db_tables(self, ctx: commands.Context):
         """Show settings row counts
 
@@ -102,7 +102,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"`user_settings` (user) — **{user_rows}** row(s)"
         )
 
-    @documented_command(db,
+    @documented_hybrid_subcommand(db,
         name="get",
     )
     async def db_get(
@@ -158,7 +158,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         for chunk in _paginate(header + "\n".join(rows)):
             await ctx.send(chunk)
 
-    @documented_command(db,
+    @documented_hybrid_subcommand(db,
         name="find",
     )
     async def db_find(self, ctx: commands.Context, entity_id: str):
@@ -198,7 +198,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         if not any_results:
             await ctx.send(f"No rows found for ID `{eid}` in any table.")
 
-    @documented_command(db,
+    @documented_hybrid_subcommand(db,
         name="set",
     )
     async def db_set(
@@ -244,7 +244,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
             f"✅ `{table_name}[{eid}].{namespace}.{key}` → `{json.dumps(parsed)}`"
         )
 
-    @documented_command(db,
+    @documented_hybrid_subcommand(db,
         name="del",
     )
     async def db_del(
@@ -284,7 +284,7 @@ class DbAdmin(commands.Cog, name="DbAdmin"):
         table_name = "guild_settings" if guild else "user_settings"
         await ctx.send(f"✅ Deleted `{table_name}[{eid}].{namespace}.{key}`")
 
-    @documented_command(db,
+    @documented_hybrid_subcommand(db,
         name="clear",
     )
     async def db_clear(

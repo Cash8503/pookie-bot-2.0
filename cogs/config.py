@@ -4,7 +4,7 @@ from urllib.parse import urlparse, parse_qs
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 
 from cogs.link_cleaner import clean_url
 
@@ -61,7 +61,7 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Rank tracker channel
     # ------------------------------------------------------------------ #
 
-    @documented_command(config,
+    @documented_hybrid_subcommand(config,
         name="ranktracker",
     )
     @commands.has_permissions(manage_guild=True)
@@ -101,7 +101,7 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Quotebook channel
     # ------------------------------------------------------------------ #
 
-    @documented_command(config,
+    @documented_hybrid_subcommand(config,
         name="quotebook",
     )
     @commands.has_permissions(manage_guild=True)
@@ -141,7 +141,7 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Auto-translate sub-group
     # ------------------------------------------------------------------ #
 
-    @documented_group(config,
+    @documented_hybrid_subgroup(config,
         name="translate",
         invoke_without_command=True,
         case_insensitive=True,
@@ -162,7 +162,7 @@ class ConfigCog(commands.Cog, name="Config"):
             ephemeral=True,
         )
 
-    @documented_command(config_translate,
+    @documented_hybrid_subcommand(config_translate,
         name="mode",
     )
     @commands.has_permissions(manage_guild=True)
@@ -191,7 +191,7 @@ class ConfigCog(commands.Cog, name="Config"):
     #  Link cleaner sub-group
     # ------------------------------------------------------------------ #
 
-    @documented_group(config,
+    @documented_hybrid_subgroup(config,
         name="linkclean",
         invoke_without_command=True,
         case_insensitive=True,
@@ -206,7 +206,7 @@ class ConfigCog(commands.Cog, name="Config"):
             {prefix}config linkclean"""
         await ctx.invoke(self.config_linkclean_status)
 
-    @documented_command(config_linkclean,
+    @documented_hybrid_subcommand(config_linkclean,
         name="toggle",
     )
     @commands.has_permissions(manage_guild=True)
@@ -223,7 +223,7 @@ class ConfigCog(commands.Cog, name="Config"):
         state = "**enabled** ✅" if new_val else "**disabled** ❌"
         await ctx.send(f"Link cleaner is now {state}.", ephemeral=True)
 
-    @documented_command(config_linkclean,
+    @documented_hybrid_subcommand(config_linkclean,
         name="ignore",
     )
     @commands.has_permissions(manage_guild=True)
@@ -245,7 +245,7 @@ class ConfigCog(commands.Cog, name="Config"):
             await self.bot.settings.set(ctx.guild.id, "link_cleaner", "ignored_channels", ignored)
             await ctx.send(f"{ctx.channel.mention} is now ignored. ❌", ephemeral=True)
 
-    @documented_command(config_linkclean,
+    @documented_hybrid_subcommand(config_linkclean,
         name="status",
     )
     @commands.has_permissions(manage_guild=True)
@@ -266,7 +266,7 @@ class ConfigCog(commands.Cog, name="Config"):
         embed.add_field(name="Ignored Channels", value=ignored, inline=False)
         await ctx.send(embed=embed, ephemeral=True)
 
-    @documented_command(config_linkclean,
+    @documented_hybrid_subcommand(config_linkclean,
         name="test",
     )
     @commands.has_permissions(manage_guild=True)

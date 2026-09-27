@@ -6,7 +6,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 
 log = logging.getLogger(__name__)
 

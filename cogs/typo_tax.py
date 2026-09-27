@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -918,7 +918,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             f"Categories: {category_list}"
         )
 
-    @documented_command(typotax, name="optin")
+    @documented_hybrid_subcommand(typotax, name="optin")
     @commands.guild_only()
     async def optin(self, ctx: commands.Context):
         """Enable typo-tax notifications
@@ -930,7 +930,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_notifications(ctx.author.id, True)
         await ctx.send("Typo tax notifications are now **on** for you.")
 
-    @documented_command(typotax, name="optout")
+    @documented_hybrid_subcommand(typotax, name="optout")
     @commands.guild_only()
     async def optout(self, ctx: commands.Context):
         """Disable typo-tax notifications
@@ -942,7 +942,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_notifications(ctx.author.id, False)
         await ctx.send("Typo tax notifications are now **off** for you. Your balance will still be tracked.")
 
-    @documented_command(typotax, name="balance")
+    @documented_hybrid_subcommand(typotax, name="balance")
     @commands.guild_only()
     async def balance(self, ctx: commands.Context, member: discord.Member | None = None):
         """Show typo-tax balance
@@ -962,7 +962,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         balance = self._balance(target.id)
         await ctx.send(f"**{target.display_name}** has a typo-tax balance of **{balance}**.")
 
-    @documented_command(typotax, name="leaderboard")
+    @documented_hybrid_subcommand(typotax, name="leaderboard")
     @commands.guild_only()
     async def leaderboard(self, ctx: commands.Context):
         """Show typo-tax leaderboard
@@ -989,7 +989,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
             lines.append(f"{index}. **{discord.utils.escape_markdown(name)}** - {balance}")
         await ctx.send("**Typo Tax Leaderboard**\n" + "\n".join(lines))
 
-    @documented_command(typotax, name="repay")
+    @documented_hybrid_subcommand(typotax, name="repay")
     @commands.guild_only()
     async def repay(self, ctx: commands.Context, category: str | None = None, stake: int | None = None):
         """Repay typo-tax debt
@@ -1022,7 +1022,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
 
         await self.start_repayment_from_context(ctx, category_key=category_key, stake=resolved_stake)
 
-    @documented_command(typotax, name="category")
+    @documented_hybrid_subcommand(typotax, name="category")
     @commands.guild_only()
     async def category(self, ctx: commands.Context, category: str | None = None):
         """Set repayment category
@@ -1057,7 +1057,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_preferred_category(ctx.author.id, category_key)
         await ctx.send(f"Default typo-tax category set to **{CATEGORY_LABELS[category_key]}**.")
 
-    @documented_command(typotax, name="stake")
+    @documented_hybrid_subcommand(typotax, name="stake")
     @commands.guild_only()
     async def stake(self, ctx: commands.Context, stake: int | None = None):
         """Set repayment stakes
@@ -1089,7 +1089,7 @@ class TypoTaxCog(commands.Cog, name="TypoTax"):
         await self._set_preferred_stake(ctx.author.id, resolved)
         await ctx.send(f"Default typo-tax stakes set to **{resolved}x**.")
 
-    @documented_command(typotax, name="forgive")
+    @documented_hybrid_subcommand(typotax, name="forgive")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def forgive(self, ctx: commands.Context, member: discord.Member, amount: int = 1):

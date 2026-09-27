@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 
 log = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class QuotesCog(commands.Cog, name="Quotes"):
     #  !quote random
     # ------------------------------------------------------------------ #
 
-    @documented_command(quote,
+    @documented_hybrid_subcommand(quote,
         name="random",
     )
     async def quote_random(self, ctx: commands.Context):

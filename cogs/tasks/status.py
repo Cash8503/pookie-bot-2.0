@@ -31,7 +31,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 try:
     from anthropic import AsyncAnthropic as _AsyncAnthropic
@@ -251,7 +251,7 @@ class StatusCog(commands.Cog, name="Status"):
             {prefix}status"""
         await send_command_help(ctx)
 
-    @documented_command(status_group,
+    @documented_hybrid_subcommand(status_group,
         name="refresh",
     )
     @commands.is_owner()

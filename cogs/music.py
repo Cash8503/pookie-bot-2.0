@@ -15,7 +15,7 @@ from typing import Literal
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_group, send_command_help
 from music.models import format_duration
 from music.player import MusicSession
 from music.sources import MusicSourceError, MusicSourceResolver, discover_ffmpeg
@@ -276,7 +276,7 @@ class MusicCog(commands.Cog, name="Music"):
                 return
         await send_command_help(ctx)
 
-    @documented_command(music, name="play")
+    @documented_hybrid_subcommand(music, name="play")
     @commands.guild_only()
     async def play(self, ctx: commands.Context, *, query: str):
         """Play or queue a song or playlist
@@ -336,7 +336,7 @@ class MusicCog(commands.Cog, name="Music"):
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
-    @documented_command(music, name="join")
+    @documented_hybrid_subcommand(music, name="join")
     @commands.guild_only()
     async def join(self, ctx: commands.Context):
         """Join your voice channel
@@ -352,7 +352,7 @@ class MusicCog(commands.Cog, name="Music"):
             return
         await ctx.send(f"🔊 Joined {session.voice.channel.mention}.", ephemeral=True)
 
-    @documented_command(music, name="queue")
+    @documented_hybrid_subcommand(music, name="queue")
     @commands.guild_only()
     async def show_queue(self, ctx: commands.Context):
         """Show the current music queue
@@ -365,7 +365,7 @@ class MusicCog(commands.Cog, name="Music"):
         if session:
             await ctx.send(embed=await self.build_queue_embed(session), ephemeral=True)
 
-    @documented_command(music, name="now")
+    @documented_hybrid_subcommand(music, name="now")
     @commands.guild_only()
     async def now(self, ctx: commands.Context):
         """Show the current track and controls
@@ -381,7 +381,7 @@ class MusicCog(commands.Cog, name="Music"):
                 view=MusicControls(self, session),
             )
 
-    @documented_command(music, name="pause")
+    @documented_hybrid_subcommand(music, name="pause")
     @commands.guild_only()
     async def pause(self, ctx: commands.Context):
         """Pause the current track
@@ -393,7 +393,7 @@ class MusicCog(commands.Cog, name="Music"):
             changed = await session.pause()
             await ctx.send("⏸️ Paused." if changed else "Nothing is currently playing.", ephemeral=True)
 
-    @documented_command(music, name="resume")
+    @documented_hybrid_subcommand(music, name="resume")
     @commands.guild_only()
     async def resume(self, ctx: commands.Context):
         """Resume paused playback
@@ -405,7 +405,7 @@ class MusicCog(commands.Cog, name="Music"):
             changed = await session.resume()
             await ctx.send("▶️ Resumed." if changed else "Playback is not paused.", ephemeral=True)
 
-    @documented_command(music, name="skip")
+    @documented_hybrid_subcommand(music, name="skip")
     @commands.guild_only()
     async def skip(self, ctx: commands.Context):
         """Skip the current track
@@ -417,7 +417,7 @@ class MusicCog(commands.Cog, name="Music"):
             changed = await session.skip()
             await ctx.send("⏭️ Skipped." if changed else "Nothing is currently playing.", ephemeral=True)
 
-    @documented_command(music, name="stop")
+    @documented_hybrid_subcommand(music, name="stop")
     @commands.guild_only()
     async def stop(self, ctx: commands.Context):
         """Stop playback and clear the queue
@@ -435,7 +435,7 @@ class MusicCog(commands.Cog, name="Music"):
         await session.stop()
         await ctx.send("⏹️ Playback stopped and the queue was cleared.", ephemeral=True)
 
-    @documented_command(music, name="shuffle")
+    @documented_hybrid_subcommand(music, name="shuffle")
     @commands.guild_only()
     async def shuffle(self, ctx: commands.Context):
         """Shuffle the queued tracks
@@ -447,7 +447,7 @@ class MusicCog(commands.Cog, name="Music"):
             count = await session.shuffle()
             await ctx.send(f"🔀 Shuffled **{count}** queued tracks.", ephemeral=True)
 
-    @documented_command(music, name="loop")
+    @documented_hybrid_subcommand(music, name="loop")
     @commands.guild_only()
     async def loop(self, ctx: commands.Context, mode: Literal["off", "track", "queue"]):
         """Set the music loop mode
@@ -468,7 +468,7 @@ class MusicCog(commands.Cog, name="Music"):
             await session.set_loop(mode)
             await ctx.send(f"🔁 Loop mode set to **{mode}**.", ephemeral=True)
 
-    @documented_command(music, name="remove")
+    @documented_hybrid_subcommand(music, name="remove")
     @commands.guild_only()
     async def remove(self, ctx: commands.Context, position: int):
         """Remove a queued track
@@ -497,7 +497,7 @@ class MusicCog(commands.Cog, name="Music"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @documented_command(music, name="clear")
+    @documented_hybrid_subcommand(music, name="clear")
     @commands.guild_only()
     async def clear(self, ctx: commands.Context):
         """Clear upcoming tracks
@@ -511,7 +511,7 @@ class MusicCog(commands.Cog, name="Music"):
             count = await session.clear()
             await ctx.send(f"🧹 Removed **{count}** queued tracks.", ephemeral=True)
 
-    @documented_command(music, name="volume")
+    @documented_hybrid_subcommand(music, name="volume")
     @commands.guild_only()
     async def volume(self, ctx: commands.Context, percent: int):
         """Set playback volume
@@ -534,7 +534,7 @@ class MusicCog(commands.Cog, name="Music"):
             await session.set_volume(percent)
             await ctx.send(f"🔊 Volume set to **{percent}%**.", ephemeral=True)
 
-    @documented_command(music, name="leave")
+    @documented_hybrid_subcommand(music, name="leave")
     @commands.guild_only()
     async def leave(self, ctx: commands.Context):
         """Disconnect the music player
@@ -552,7 +552,7 @@ class MusicCog(commands.Cog, name="Music"):
         await self.close_session(session.guild_id)
         await ctx.send("👋 Disconnected from voice.", ephemeral=True)
 
-    @documented_command(music, name="diagnostics")
+    @documented_hybrid_subcommand(music, name="diagnostics")
     @commands.guild_only()
     async def diagnostics(self, ctx: commands.Context):
         """Check local music dependencies

@@ -30,7 +30,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._rank_tracking import mark_attempt, mark_pending, mark_success, mark_unavailable
 
 log = logging.getLogger("ow_picker")
 
@@ -624,7 +625,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  QP subcommand
     # ------------------------------------------------------------------ #
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="qp",
     )
     async def ow_qp(self, ctx: commands.Context, count: str | None = None):
@@ -704,7 +705,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Stadium subcommand
     # ------------------------------------------------------------------ #
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="stadium",
     )
     async def ow_stadium(self, ctx: commands.Context, count: str | None = None):
@@ -801,7 +802,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
     #  Link / Unlink / Stats subcommands
     # ------------------------------------------------------------------ #
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="link",
     )
     async def ow_link(self, ctx: commands.Context, member: discord.Member | None = None, *, battletag: str):
@@ -830,7 +831,11 @@ class OWPicker(commands.Cog, name="Overwatch"):
             await ctx.send("❌ Invalid format. Use `Name#1234` — e.g. `CoolPlayer#1234`.", ephemeral=True)
             return
 
+        previous = self.bot.settings.get_user(target.id, "ow", "battletag")
         await self.bot.settings.set_user(target.id, "ow", "battletag", battletag)
+        if previous and previous.casefold() != battletag.casefold():
+            await self.bot.settings.delete_user(target.id, "ow", "rank_snapshot")
+        await mark_pending(self.bot.settings, target.id)
 
         if target != ctx.author:
             dm_note = ""
@@ -851,7 +856,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
                 ephemeral=True,
             )
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="unlink",
     )
     async def ow_unlink(self, ctx: commands.Context, member: discord.Member | None = None):
@@ -881,6 +886,8 @@ class OWPicker(commands.Cog, name="Overwatch"):
             return
 
         await self.bot.settings.delete_user(target.id, "ow", "battletag")
+        await self.bot.settings.delete_user(target.id, "ow", "rank_snapshot")
+        await self.bot.settings.delete_user(target.id, "ow", "rank_tracker")
 
         if target != ctx.author:
             dm_note = ""
@@ -895,7 +902,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
         else:
             await ctx.send(f"✅ Your battletag (**{existing}**) has been unlinked.", ephemeral=True)
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="linked",
     )
     async def ow_linked(self, ctx: commands.Context):
@@ -927,13 +934,12 @@ class OWPicker(commands.Cog, name="Overwatch"):
         lines = "\n".join(f"**{name}** — `{tag}`" for name, tag in rows)
         await ctx.send(f"🎮 **Linked Overwatch Accounts** ({len(rows)})\n\n{lines}")
 
-    @documented_command(ow,
-        name="stats",
-    )
+    @documented_hybrid_subcommand(ow, name="stats")
     async def ow_stats(self, ctx: commands.Context, user: discord.Member | None = None):
         """Show linked Overwatch stats
 
         Fetches ranks, time played, win rate, and top heroes for a linked profile.
+        This manual lookup bypasses rank tracker's daily private-profile backoff.
 
         Usage:
             {prefix}ow stats [member]
@@ -943,7 +949,11 @@ class OWPicker(commands.Cog, name="Overwatch"):
 
         Examples:
             {prefix}ow stats
-            {prefix}ow stats @Cash"""
+            {prefix}ow stats @Cash
+            {prefix}ow refresh
+
+        Notes:
+            Private or missing profiles are otherwise retried automatically once per day."""
         member = user or ctx.author
         battletag = self.bot.settings.get_user(member.id, "ow", "battletag")
 
@@ -959,6 +969,7 @@ class OWPicker(commands.Cog, name="Overwatch"):
             try:
                 data = await fetch_player(self.session, player_id)
             except ValueError:
+                await mark_unavailable(self.bot.settings, member.id)
                 await ctx.send(
                     f"❌ Couldn't find **{battletag}**. "
                     "Check the battletag is correct and the career profile is set to **public**. "
@@ -966,18 +977,38 @@ class OWPicker(commands.Cog, name="Overwatch"):
                 )
                 return
             except Exception as e:
+                await mark_attempt(self.bot.settings, member.id)
                 log.error("Failed to fetch OW stats for %s: %s", battletag, e)
                 await ctx.send("❌ Couldn't reach the Overwatch API. Try again in a moment.")
                 return
 
+            await mark_success(self.bot.settings, member.id)
             embed = build_embed_stats(data, battletag, ctx.author)
             await ctx.send(embed=embed)
+
+    @documented_hybrid_subcommand(ow, name="refresh")
+    async def ow_refresh(self, ctx: commands.Context, user: discord.Member | None = None):
+        """Refresh linked Overwatch stats
+
+        Manually checks a linked profile immediately, bypassing the daily retry
+        delay for private or missing accounts.
+
+        Usage:
+            {prefix}ow refresh [member]
+
+        Arguments:
+            user: Server member to refresh (uses their linked battletag)
+
+        Examples:
+            {prefix}ow refresh
+            {prefix}ow refresh @Cash"""
+        await ctx.invoke(self.ow_stats, user=user)
 
     # ------------------------------------------------------------------ #
     #  Whois subcommand
     # ------------------------------------------------------------------ #
 
-    @documented_command(ow,
+    @documented_hybrid_subcommand(ow,
         name="whois",
     )
     async def ow_whois(self, ctx: commands.Context, *, query: str):

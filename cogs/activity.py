@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -330,9 +330,8 @@ class ActivityCog(commands.Cog, name="Activity"):
             {prefix}activity"""
         await send_command_help(ctx)
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity,
         name="leaderboard",
-        aliases=["top"],
     )
     async def leaderboard(self, ctx: commands.Context, period: str = "month"):
         """Show the most active members
@@ -412,7 +411,24 @@ class ActivityCog(commands.Cog, name="Activity"):
         view   = _LeaderboardPaginator(lines, title, footer)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity, name="top")
+    async def activity_top(self, ctx: commands.Context, period: str = "month"):
+        """Show the activity leaderboard
+
+        Provides the short `top` command as a real prefix and slash subcommand.
+
+        Usage:
+            {prefix}activity top [all]
+
+        Arguments:
+            period: 'all' for lifetime stats, leave blank for this month
+
+        Examples:
+            {prefix}activity top
+            {prefix}activity top all"""
+        await ctx.invoke(self.leaderboard, period=period)
+
+    @documented_hybrid_subcommand(activity,
         name="stats",
     )
     async def stats(self, ctx: commands.Context, member: discord.Member = None):
@@ -486,7 +502,7 @@ class ActivityCog(commands.Cog, name="Activity"):
         embed.set_thumbnail(url=target.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity,
         name="emojis",
     )
     async def emojis(self, ctx: commands.Context, period: str = "month"):
@@ -533,7 +549,7 @@ class ActivityCog(commands.Cog, name="Activity"):
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity,
         name="emoji",
     )
     async def emoji_who(self, ctx: commands.Context, emoji: str, period: str = "month"):
@@ -610,7 +626,7 @@ class ActivityCog(commands.Cog, name="Activity"):
         view  = _LeaderboardPaginator(lines, title)
         view.message = await ctx.send(embed=view._build_embed(), view=view if view.total > 1 else None)
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity,
         name="summary",
     )
     async def summary(self, ctx: commands.Context, period: str = "month"):
@@ -691,7 +707,7 @@ class ActivityCog(commands.Cog, name="Activity"):
 
         await ctx.send(embed=embed)
 
-    @documented_command(activity,
+    @documented_hybrid_subcommand(activity,
         name="backfill",
     )
     @commands.has_permissions(manage_guild=True)

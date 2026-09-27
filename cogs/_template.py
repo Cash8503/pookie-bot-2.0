@@ -1,7 +1,7 @@
 import logging
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class TemplateCog(commands.Cog, name="Template"):
             {prefix}template"""
         await send_command_help(ctx)
 
-    @documented_command(template,
+    @documented_hybrid_subcommand(template,
         name="example",
     )
     async def example(self, ctx: commands.Context):

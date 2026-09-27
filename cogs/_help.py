@@ -168,7 +168,18 @@ def documented_bot_hybrid_command(bot: commands.Bot, **kwargs):
     return decorator
 
 
-def documented_command(parent: commands.Group, **kwargs):
+def _require_hybrid_parent(parent: commands.Group) -> commands.HybridGroup:
+    if not isinstance(parent, commands.HybridGroup):
+        raise TypeError(
+            "Documented subcommands must be attached to a HybridGroup so they "
+            "are available as both prefix and slash commands."
+        )
+    return parent
+
+
+def documented_hybrid_subcommand(parent: commands.HybridGroup, **kwargs):
+    parent = _require_hybrid_parent(parent)
+
     def decorator(callback):
         documented, cleaned = _documented_kwargs(callback, kwargs)
         return parent.command(**cleaned)(documented)
@@ -176,7 +187,9 @@ def documented_command(parent: commands.Group, **kwargs):
     return decorator
 
 
-def documented_group(parent: commands.Group, **kwargs):
+def documented_hybrid_subgroup(parent: commands.HybridGroup, **kwargs):
+    parent = _require_hybrid_parent(parent)
+
     def decorator(callback):
         documented, cleaned = _documented_kwargs(callback, kwargs)
         return parent.group(**cleaned)(documented)
@@ -226,9 +239,13 @@ def validate_hybrid_commands(bot: commands.Bot) -> list[str]:
         command.qualified_name
         for command in bot.walk_commands()
         if not isinstance(command, hybrid_types)
+        or getattr(command, "app_command", None) is None
     ]
     if non_hybrid:
-        log.warning("Non-hybrid commands detected: %s", ", ".join(sorted(non_hybrid)))
+        log.warning(
+            "Commands missing a prefix/slash path: %s",
+            ", ".join(sorted(non_hybrid)),
+        )
     return non_hybrid
 
 

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord.ext import commands, tasks
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group, send_command_help
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -166,7 +166,6 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
 
     @documented_hybrid_group(
         name="birthday",
-        aliases=["birthdays"],
         invoke_without_command=True,
         case_insensitive=True,
     )
@@ -179,7 +178,7 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
             {prefix}birthday"""
         await send_command_help(ctx)
 
-    @documented_command(birthday,
+    @documented_hybrid_subcommand(birthday,
         name="set",
     )
     async def birthday_set(self, ctx: commands.Context, *, date: str):
@@ -206,7 +205,7 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         pretty = dt.strftime("%B %d")
         await ctx.send(f"🎂 Birthday set to **{pretty}**!", ephemeral=True)
 
-    @documented_command(birthday,
+    @documented_hybrid_subcommand(birthday,
         name="remove",
     )
     async def birthday_remove(self, ctx: commands.Context):
@@ -222,7 +221,7 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         await self.bot.settings.delete_user(ctx.author.id, "birthdays", "date")
         await ctx.send("✅ Your birthday has been removed.", ephemeral=True)
 
-    @documented_command(birthday,
+    @documented_hybrid_subcommand(birthday,
         name="list",
     )
     async def birthday_list(self, ctx: commands.Context):
@@ -276,7 +275,7 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         )
         await ctx.send(embed=embed)
 
-    @documented_command(birthday,
+    @documented_hybrid_subcommand(birthday,
         name="setchannel",
     )
     async def birthday_setchannel(self, ctx: commands.Context, channel: discord.TextChannel):
@@ -295,7 +294,7 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         await self.bot.settings.set(ctx.guild.id, "birthdays", "channel", channel.id)
         await ctx.send(f"✅ Birthday announcements will post in {channel.mention}.", ephemeral=True)
 
-    @documented_command(birthday,
+    @documented_hybrid_subcommand(birthday,
         name="announce",
     )
     async def birthday_announce(self, ctx: commands.Context, *, time: str = ""):
@@ -355,6 +354,93 @@ class BirthdayCog(commands.Cog, name="Birthdays"):
         )
         t_str = target.strftime("%H:%M UTC")
         await ctx.send(f"⏰ Birthday announcements scheduled for **{t_str}** (in {int(delay // 60)} min).")
+
+    # Keep the historic plural command as a complete hybrid command tree.
+    # Discord application commands do not support prefix-style aliases, so
+    # explicit forwarding subcommands are required for /birthdays parity.
+
+    @documented_hybrid_group(
+        name="birthdays",
+        invoke_without_command=True,
+        case_insensitive=True,
+    )
+    async def birthdays(self, ctx: commands.Context):
+        """Track and announce birthdays
+
+        Plural command path for the birthday tools.
+
+        Usage:
+            {prefix}birthdays"""
+        await send_command_help(ctx)
+
+    @documented_hybrid_subcommand(birthdays, name="set")
+    async def birthdays_set(self, ctx: commands.Context, *, date: str):
+        """Set your birthday
+
+        Stores your month and day through the plural birthday command path.
+
+        Usage:
+            {prefix}birthdays set <date>
+
+        Arguments:
+            date: Birthday date such as March 25 or 03-25
+
+        Examples:
+            {prefix}birthdays set March 25"""
+        await ctx.invoke(self.birthday_set, date=date)
+
+    @documented_hybrid_subcommand(birthdays, name="remove")
+    async def birthdays_remove(self, ctx: commands.Context):
+        """Remove your birthday
+
+        Deletes your stored birthday through the plural command path.
+
+        Usage:
+            {prefix}birthdays remove"""
+        await ctx.invoke(self.birthday_remove)
+
+    @documented_hybrid_subcommand(birthdays, name="list")
+    async def birthdays_list(self, ctx: commands.Context):
+        """List server birthdays
+
+        Shows upcoming birthdays through the plural command path.
+
+        Usage:
+            {prefix}birthdays list"""
+        await ctx.invoke(self.birthday_list)
+
+    @documented_hybrid_subcommand(birthdays, name="setchannel")
+    async def birthdays_setchannel(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Set birthday announcement channel
+
+        Sets the announcement channel through the plural command path.
+
+        Usage:
+            {prefix}birthdays setchannel <channel>
+
+        Arguments:
+            channel: Text channel for birthday announcements
+
+        Examples:
+            {prefix}birthdays setchannel #birthdays"""
+        await ctx.invoke(self.birthday_setchannel, channel=channel)
+
+    @documented_hybrid_subcommand(birthdays, name="announce")
+    async def birthdays_announce(self, ctx: commands.Context, *, time: str = ""):
+        """Trigger birthday announcements
+
+        Runs or schedules announcements through the plural command path.
+
+        Usage:
+            {prefix}birthdays announce [time|MM-DD]
+
+        Arguments:
+            time: Optional UTC time or MM-DD date override
+
+        Examples:
+            {prefix}birthdays announce
+            {prefix}birthdays announce 9am"""
+        await ctx.invoke(self.birthday_announce, time=time)
 
 
 async def setup(bot: commands.Bot):

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_hybrid_group, send_command_help
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_group, send_command_help
 from cogs._guild_cogs import (
     PROTECTED_COGS,
     get_disabled_cogs,
@@ -105,7 +105,7 @@ class Admin(commands.Cog, name="Admin"):
     #  Per-guild availability
     # ------------------------------------------------------------------ #
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="enable",
     )
     async def enable_cog(self, ctx: commands.Context, cog: str):
@@ -140,7 +140,7 @@ class Admin(commands.Cog, name="Admin"):
         )
         log.info("Enabled cog %s in guild %s (requested by %s)", name, ctx.guild.id, ctx.author)
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="disable",
     )
     async def disable_cog(self, ctx: commands.Context, cog: str):
@@ -178,7 +178,7 @@ class Admin(commands.Cog, name="Admin"):
         )
         log.info("Disabled cog %s in guild %s (requested by %s)", name, ctx.guild.id, ctx.author)
 
-    @documented_command(admin, name="globalenable")
+    @documented_hybrid_subcommand(admin, name="globalenable")
     async def global_enable_cog(self, ctx: commands.Context, cog: str):
         """Enable a cog on startup globally
 
@@ -206,7 +206,7 @@ class Admin(commands.Cog, name="Admin"):
         await ctx.send(f"Globally enabled `{name}` - it will load on next startup.")
         log.info("Globally enabled cog %s (requested by %s)", name, ctx.author)
 
-    @documented_command(admin, name="globaldisable")
+    @documented_hybrid_subcommand(admin, name="globaldisable")
     async def global_disable_cog(self, ctx: commands.Context, cog: str):
         """Disable a cog on startup globally
 
@@ -241,7 +241,7 @@ class Admin(commands.Cog, name="Admin"):
     #  Runtime control — start / stop / reload
     # ------------------------------------------------------------------ #
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="start",
     )
     async def start_cog(self, ctx: commands.Context, cog: str):
@@ -264,7 +264,7 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to start `{name}`: `{e}`")
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="stop",
     )
     async def stop_cog(self, ctx: commands.Context, cog: str):
@@ -287,7 +287,7 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to stop `{name}`: `{e}`")
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="reload",
     )
     async def reload_cog(self, ctx: commands.Context, cog: str):
@@ -319,7 +319,7 @@ class Admin(commands.Cog, name="Admin"):
         except Exception as e:
             await ctx.send(f"❌ Failed to reload `{name}`: `{e}`")
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="reloadall",
     )
     async def reload_all(self, ctx: commands.Context):
@@ -340,7 +340,7 @@ class Admin(commands.Cog, name="Admin"):
         await self._refresh_runtime_commands()
         await ctx.send("\n".join(results[:25]))
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="list",
     )
     async def list_cogs(self, ctx: commands.Context):
@@ -370,7 +370,7 @@ class Admin(commands.Cog, name="Admin"):
 
         await ctx.send("\n".join(results[:25]))
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="nuke",
     )
     async def nuke(self, ctx: commands.Context, count: int):
@@ -395,7 +395,7 @@ class Admin(commands.Cog, name="Admin"):
         await ctx.send(f"🗑️ Deleted **{len(deleted)}** message(s).")
         log.info("Nuke: deleted %d message(s) in #%s (requested by %s)", len(deleted), ctx.channel, ctx.author)
 
-    @documented_command(admin,
+    @documented_hybrid_subcommand(admin,
         name="restart",
     )
     async def restart_bot(self, ctx: commands.Context):

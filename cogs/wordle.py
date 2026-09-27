@@ -7,7 +7,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 from PIL import Image, ImageDraw, ImageFont
 
 log = logging.getLogger(__name__)
@@ -416,7 +416,7 @@ class WordleCog(commands.Cog, name="Wordle"):
 
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @documented_command(wordle, name="reset")
+    @documented_hybrid_subcommand(wordle, name="reset")
     async def wordle_reset(self, ctx: commands.Context):
         """Get a fresh Wordle word
 
@@ -437,7 +437,7 @@ class WordleCog(commands.Cog, name="Wordle"):
         view = WordleView(self.bot, ctx.author.id)
         view.message = await ctx.send(content=text, file=file, view=view)
 
-    @documented_command(wordle, name="stats")
+    @documented_hybrid_subcommand(wordle, name="stats")
     async def wordle_stats(self, ctx: commands.Context):
         """Show your Wordle stats
 

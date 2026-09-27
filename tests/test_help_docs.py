@@ -82,8 +82,8 @@ def test_every_plugin_and_command_has_local_documentation():
                     "documented_hybrid_command",
                     "documented_hybrid_group",
                     "documented_bot_hybrid_command",
-                    "documented_command",
-                    "documented_group",
+                    "documented_hybrid_subcommand",
+                    "documented_hybrid_subgroup",
                     "hybrid_command",
                     "hybrid_group",
                 }

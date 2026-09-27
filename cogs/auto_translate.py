@@ -22,7 +22,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from cogs._help import documented_command, documented_group, documented_hybrid_command, documented_hybrid_group
+from cogs._help import documented_hybrid_subcommand, documented_hybrid_subgroup, documented_hybrid_command, documented_hybrid_group
 from cogs._guild_cogs import is_cog_disabled
 
 log = logging.getLogger(__name__)
@@ -330,7 +330,7 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
             "`!translate lang <code>` — set target language, e.g. `en`, `es`, `ja`"
         )
 
-    @documented_command(translate_group, name="mode")
+    @documented_hybrid_subcommand(translate_group, name="mode")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_mode(self, ctx: commands.Context, mode: str):
@@ -359,7 +359,7 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
                 self._sessions.pop(cid, None)
         await ctx.send(f"✅ Translation mode set to **{mode}**.")
 
-    @documented_command(translate_group, name="provider")
+    @documented_hybrid_subcommand(translate_group, name="provider")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_provider(self, ctx: commands.Context, provider: str):
@@ -384,7 +384,7 @@ class AutoTranslateCog(commands.Cog, name="AutoTranslate"):
         await self.bot.settings.set(ctx.guild.id, "auto_translate", "provider", provider)
         await ctx.send(f"✅ Translation provider set to **{provider}**.")
 
-    @documented_command(translate_group, name="lang")
+    @documented_hybrid_subcommand(translate_group, name="lang")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def set_lang(self, ctx: commands.Context, code: str):
