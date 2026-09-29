@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import random
+import re
+import subprocess
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
@@ -17,6 +20,58 @@ log = logging.getLogger(__name__)
 UpdateCallback = Callable[["MusicSession"], Awaitable[None]]
 ErrorCallback = Callable[["MusicSession", str], Awaitable[None]]
 CloseCallback = Callable[["MusicSession"], Awaitable[None]]
+
+PLAYBACK_ATTEMPTS = 2
+_MEDIA_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _ffmpeg_stderr_summary(stderr: io.BytesIO) -> str:
+    """Return a short diagnostic without leaking signed media URLs."""
+    text = stderr.getvalue().decode("utf-8", errors="replace")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    summary = " | ".join(lines[-3:])
+    return _MEDIA_URL_RE.sub("<media URL>", summary)[:600]
+
+
+class FFmpegPlaybackError(RuntimeError):
+    """Raised when FFmpeg exits unsuccessfully instead of finishing a track."""
+
+
+class CheckedFFmpegPCMAudio(discord.FFmpegPCMAudio):
+    """Make FFmpeg exit codes visible to discord.py's playback callback."""
+
+    def __init__(self, *args, **kwargs):
+        self.stderr_capture = io.BytesIO()
+        kwargs["stderr"] = self.stderr_capture
+        super().__init__(*args, **kwargs)
+
+    def read(self) -> bytes:
+        data = super().read()
+        if data:
+            return data
+
+        process = getattr(self, "_process", None)
+        return_code = process.poll() if process else None
+        if process and return_code is None:
+            try:
+                return_code = process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                return_code = process.poll()
+        if return_code not in (None, 0):
+            detail = _ffmpeg_stderr_summary(self.stderr_capture)
+            suffix = f" ({detail})" if detail else ""
+            raise FFmpegPlaybackError(f"FFmpeg exited with code {return_code}{suffix}")
+        return b""
+
+
+def _ended_too_early(track: Track, elapsed: float) -> bool:
+    """Detect an EOF that is far too early to be a legitimate track ending."""
+    if not track.duration or track.duration <= 15:
+        return False
+    minimum_expected = min(8.0, max(3.0, track.duration * 0.1))
+    return elapsed < minimum_expected
 
 
 class MusicSession:
@@ -220,6 +275,56 @@ class MusicSession:
             await self.close()
             return False
 
+    async def _play_once(self, track: Track, attempt: int) -> tuple[bool, str | None]:
+        self._playback_error = None
+        self._track_done.clear()
+
+        stream = await asyncio.wait_for(
+            self.resolver.resolve_stream(track, attempt=attempt),
+            timeout=60,
+        )
+        # Spotify remains authoritative for every display field. The YouTube
+        # match contributes only its direct audio stream and transport headers.
+        if not track.provider.startswith("Spotify"):
+            track.webpage_url = stream.webpage_url
+            track.title = stream.title or track.title
+            track.duration = stream.duration or track.duration
+            track.thumbnail = stream.thumbnail or track.thumbnail
+
+        before_options = (
+            "-nostdin -rw_timeout 15000000 -reconnect 1 "
+            "-reconnect_streamed 1 -reconnect_delay_max 5"
+        )
+        if stream.user_agent:
+            user_agent = stream.user_agent.replace('"', "").replace("\r", "").replace("\n", "")
+            before_options += f' -user_agent "{user_agent}"'
+        if stream.referer:
+            referer = stream.referer.replace('"', "").replace("\r", "").replace("\n", "")
+            before_options += f' -referer "{referer}"'
+
+        audio = CheckedFFmpegPCMAudio(
+            stream.stream_url,
+            executable=self.ffmpeg_path,
+            before_options=before_options,
+            options="-vn -loglevel warning",
+        )
+        source = discord.PCMVolumeTransformer(audio, volume=self.volume)
+        try:
+            self.voice.play(source, after=self._after_playback)
+        except Exception:
+            source.cleanup()
+            raise
+        self.started_at = time.monotonic()
+        await self.notify_update()
+        await self._track_done.wait()
+
+        elapsed = time.monotonic() - self.started_at
+        if self._playback_error:
+            return False, str(self._playback_error)
+        if _ended_too_early(track, elapsed):
+            return False, f"the audio stream ended after only {elapsed:.1f} seconds"
+        return True, None
+
     async def _player_loop(self) -> None:
         try:
             while not self.closed:
@@ -239,47 +344,46 @@ class MusicSession:
 
                 self.current = track
                 self._discard_current = False
-                self._playback_error = None
-                self._track_done.clear()
+                completed = False
+                failure: str | None = None
+                for attempt in range(PLAYBACK_ATTEMPTS):
+                    if self.closed or self._discard_current:
+                        break
+                    try:
+                        completed, failure = await self._play_once(track, attempt)
+                    except MusicSourceError as exc:
+                        failure = str(exc)
+                    except asyncio.TimeoutError:
+                        failure = "source resolution timed out"
+                    except Exception as exc:
+                        failure = str(exc) or type(exc).__name__
+                        log.exception(
+                            "Playback attempt %s failed for %s",
+                            attempt + 1,
+                            track.display_title,
+                        )
 
-                try:
-                    stream = await asyncio.wait_for(self.resolver.resolve_stream(track), timeout=60)
-                    track.webpage_url = stream.webpage_url
-                    track.title = stream.title or track.title
-                    track.duration = stream.duration or track.duration
-                    track.thumbnail = stream.thumbnail or track.thumbnail
-                    before_options = "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-                    if stream.user_agent:
-                        user_agent = stream.user_agent.replace('"', "").replace("\r", "").replace("\n", "")
-                        before_options += f' -user_agent "{user_agent}"'
-                    if stream.referer:
-                        referer = stream.referer.replace('"', "").replace("\r", "").replace("\n", "")
-                        before_options += f' -referer "{referer}"'
-                    audio = discord.FFmpegPCMAudio(
-                        stream.stream_url,
-                        executable=self.ffmpeg_path,
-                        before_options=before_options,
-                        options="-vn -loglevel warning",
+                    if completed or self.closed or self._discard_current:
+                        break
+                    log.warning(
+                        "Playback attempt %s failed for %s: %s",
+                        attempt + 1,
+                        track.display_title,
+                        failure,
                     )
-                    source = discord.PCMVolumeTransformer(audio, volume=self.volume)
-                    self.voice.play(source, after=self._after_playback)
-                    self.started_at = time.monotonic()
-                    await self.notify_update()
-                    await self._track_done.wait()
-                except MusicSourceError as exc:
-                    self._discard_current = True
-                    await self.notify_error(f"Skipped **{track.title}**: {exc}")
-                except asyncio.TimeoutError:
-                    self._discard_current = True
-                    await self.notify_error(f"Skipped **{track.title}** because source resolution timed out.")
-                except Exception as exc:
-                    self._discard_current = True
-                    log.exception("Playback failed for %s", track.title)
-                    await self.notify_error(f"Skipped **{track.title}** because playback failed: {exc}")
+                    if attempt + 1 < PLAYBACK_ATTEMPTS:
+                        self.started_at = None
+                        await self.notify_error(
+                            f"Playback failed for **{track.display_title}**; "
+                            "retrying with an alternate audio format."
+                        )
 
-                if self._playback_error:
+                if not completed and not self.closed and not self._discard_current:
                     self._discard_current = True
-                    await self.notify_error(f"Audio playback stopped unexpectedly: {self._playback_error}")
+                    await self.notify_error(
+                        f"Skipped **{track.display_title}** after {PLAYBACK_ATTEMPTS} playback attempts: "
+                        f"{failure or 'the audio stream ended unexpectedly'}."
+                    )
                 if not self._discard_current and not self.closed:
                     await self._requeue_after_playback(track)
 

@@ -11,10 +11,15 @@ class Track:
     requester_id: int
     requester_name: str
     provider: str
+    artist: str | None = None
     duration: int | None = None
     thumbnail: str | None = None
     lookup_query: str | None = None
     original_url: str | None = None
+
+    @property
+    def display_title(self) -> str:
+        return f"{self.artist} — {self.title}" if self.artist else self.title
 
 
 @dataclass(slots=True)

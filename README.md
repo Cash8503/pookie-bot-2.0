@@ -55,6 +55,7 @@ Music settings in `.env`:
 |---|---:|---|
 | `MUSIC_DEFAULT_VOLUME` | `50` | Initial session volume, 0-100 |
 | `MUSIC_MAX_PLAYLIST` | `100` | Maximum entries accepted from one playlist |
+| `MUSIC_IMPORT_WORKERS` | `6` | Concurrent Spotify collection page requests, 2-16 |
 | `MUSIC_IDLE_TIMEOUT` | `180` | Seconds before an empty player disconnects |
 | `FFMPEG_PATH` | blank | Optional explicit FFmpeg executable |
 | `YTDLP_COOKIE_FILE` | blank | Optional private Netscape-format cookies file |

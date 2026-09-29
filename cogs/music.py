@@ -37,15 +37,32 @@ def _safe_text(value: str, limit: int = 100) -> str:
     return value[:limit]
 
 
+def _music_gathering_message(query: str) -> str:
+    lowered = query.strip().lower()
+    if "open.spotify.com/playlist/" in lowered:
+        return "🎶 Pookie is gathering your Spotify playlist…"
+    if "open.spotify.com/album/" in lowered:
+        return "💿 Pookie is gathering your Spotify album…"
+    if "open.spotify.com/track/" in lowered:
+        return "🎵 Pookie is finding your Spotify track and preparing its audio…"
+    if "list=" in lowered or "playlist" in lowered:
+        return "🎶 Pookie is gathering your playlist…"
+    return "🔎 Pookie is finding your song and preparing its audio…"
+
+
 class MusicCog(commands.Cog, name="Music"):
     """Play songs and playlists in voice with an interactive control panel."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.max_playlist = _env_int("MUSIC_MAX_PLAYLIST", 100, 1, 500)
+        self.import_workers = _env_int("MUSIC_IMPORT_WORKERS", 6, 2, 16)
         self.default_volume = _env_int("MUSIC_DEFAULT_VOLUME", 50, 0, 100)
         self.idle_timeout = _env_int("MUSIC_IDLE_TIMEOUT", 180, 30, 3600)
-        self.resolver = MusicSourceResolver(max_playlist=self.max_playlist)
+        self.resolver = MusicSourceResolver(
+            max_playlist=self.max_playlist,
+            spotify_workers=self.import_workers,
+        )
         self.sessions: dict[int, MusicSession] = {}
         self._panel_locks: dict[int, asyncio.Lock] = {}
 
@@ -193,12 +210,32 @@ class MusicCog(commands.Cog, name="Music"):
         await session.close()
         return True
 
+    async def _edit_music_status(
+        self,
+        ctx: commands.Context,
+        message: discord.Message,
+        content: str,
+    ) -> None:
+        try:
+            await message.edit(
+                content=content,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            await ctx.send(
+                content,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
     async def build_now_playing_embed(self, session: MusicSession) -> discord.Embed:
         queue = await session.queue_snapshot()
         current = session.current
         if current:
             state = "Paused" if session.is_paused else "Now Playing"
             description = f"[{_safe_text(current.title, 200)}]({current.webpage_url})"
+            if current.artist:
+                description += f"\nby **{_safe_text(current.artist, 200)}**"
             color = 0xFEE75C if session.is_paused else 0x57F287
         elif queue:
             state = "Preparing Next Track"
@@ -214,10 +251,7 @@ class MusicCog(commands.Cog, name="Music"):
             embed.add_field(name="Duration", value=format_duration(current.duration), inline=True)
             embed.add_field(name="Requested by", value=current.requester_name, inline=True)
             if current.provider.startswith("Spotify") and current.original_url:
-                source_value = (
-                    f"[Spotify metadata]({current.original_url}) → "
-                    f"[YouTube audio]({current.webpage_url})"
-                )
+                source_value = f"[Spotify]({current.original_url}) · audio stream matched via YouTube"
             else:
                 source_value = current.provider
             embed.add_field(name="Source", value=source_value, inline=True)
@@ -228,7 +262,7 @@ class MusicCog(commands.Cog, name="Music"):
         embed.add_field(name="Queued", value=str(len(queue)), inline=True)
         if queue:
             upcoming = "\n".join(
-                f"`{index}.` {_safe_text(track.title, 80)} · {format_duration(track.duration)}"
+                f"`{index}.` {_safe_text(track.display_title, 80)} · {format_duration(track.duration)}"
                 for index, track in enumerate(queue[:5], start=1)
             )
             if len(queue) > 5:
@@ -242,13 +276,15 @@ class MusicCog(commands.Cog, name="Music"):
         embed = discord.Embed(title="Music Queue", color=0x5865F2)
         if session.current:
             embed.description = (
-                f"Now: [{_safe_text(session.current.title, 200)}]({session.current.webpage_url})"
+                f"Now: [{_safe_text(session.current.display_title, 200)}]"
+                f"({session.current.webpage_url})"
             )
         if not queue:
             embed.add_field(name="Up Next", value="The queue is empty.", inline=False)
             return embed
         lines = [
-            f"`{index}.` [{_safe_text(track.title, 80)}]({track.webpage_url}) · {format_duration(track.duration)}"
+            f"`{index}.` [{_safe_text(track.display_title, 80)}]({track.webpage_url}) · "
+            f"{format_duration(track.duration)}"
             for index, track in enumerate(queue[:10], start=1)
         ]
         if len(queue) > 10:
@@ -293,13 +329,14 @@ class MusicCog(commands.Cog, name="Music"):
             {prefix}music play The Weeknd Blinding Lights
             {prefix}music play https://www.youtube.com/playlist?list=...
             {prefix}music play https://open.spotify.com/playlist/..."""
-        await ctx.defer()
         if not isinstance(ctx.author, discord.Member):
             await ctx.send("Use this command in a server.", ephemeral=True)
             return
         if not ctx.author.voice:
             await ctx.send("Join a voice channel first.", ephemeral=True)
             return
+
+        status_message = await ctx.send(_music_gathering_message(query), ephemeral=True)
         try:
             result = await asyncio.wait_for(
                 self.resolver.resolve(
@@ -309,31 +346,45 @@ class MusicCog(commands.Cog, name="Music"):
                 ),
                 timeout=90,
             )
+            track_word = "track" if len(result.tracks) == 1 else "tracks"
+            await self._edit_music_status(
+                ctx,
+                status_message,
+                f"🎧 Pookie gathered **{len(result.tracks)} {track_word}** and is joining your voice channel…",
+            )
             session = await self._connect(ctx)
             session.text_channel = ctx.channel
             count = await session.enqueue(result.tracks)
         except MusicSourceError as exc:
-            await ctx.send(f"❌ {exc}", ephemeral=True)
+            await self._edit_music_status(ctx, status_message, f"❌ {exc}")
             return
         except asyncio.TimeoutError:
-            await ctx.send("❌ That playlist took too long to resolve.", ephemeral=True)
+            await self._edit_music_status(
+                ctx,
+                status_message,
+                "❌ That playlist took too long to resolve.",
+            )
             return
         except (discord.ClientException, discord.Forbidden, discord.HTTPException) as exc:
-            await ctx.send(f"❌ I could not join voice: {exc}", ephemeral=True)
+            await self._edit_music_status(
+                ctx,
+                status_message,
+                f"❌ I could not join voice: {exc}",
+            )
             return
 
         if count == 1:
-            await ctx.send(
-                f"✅ Added **{_safe_text(result.tracks[0].title, 200)}** to the queue.",
-                ephemeral=True,
-                allowed_mentions=discord.AllowedMentions.none(),
+            await self._edit_music_status(
+                ctx,
+                status_message,
+                f"✅ Added **{_safe_text(result.tracks[0].display_title, 200)}** to the queue.",
             )
         else:
             capped = " (playlist limit reached)" if count >= self.max_playlist else ""
-            await ctx.send(
+            await self._edit_music_status(
+                ctx,
+                status_message,
                 f"✅ Added **{count} tracks** from **{_safe_text(result.title, 200)}**{capped}.",
-                ephemeral=True,
-                allowed_mentions=discord.AllowedMentions.none(),
             )
 
     @documented_hybrid_subcommand(music, name="join")

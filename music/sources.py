@@ -5,6 +5,8 @@ import ipaddress
 import logging
 import os
 import shutil
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -42,6 +44,14 @@ ALLOWED_MEDIA_HOSTS = {
     "mixcloud.com",
     "dailymotion.com",
 }
+
+# Prefer the broadly supported M4A/AAC stream first. Some minimal or bundled
+# FFmpeg builds are unstable with specific WebM/Opus inputs; a retry deliberately
+# flips the preference so one bad container does not burn through a whole queue.
+STREAM_FORMATS = (
+    "bestaudio[ext=m4a][acodec!=none]/bestaudio[acodec!=none]/best",
+    "bestaudio[ext=webm][acodec!=none]/bestaudio[acodec!=none]/best",
+)
 
 
 def discover_ffmpeg() -> str | None:
@@ -110,8 +120,9 @@ def _provider_from(info: dict, fallback_url: str) -> str:
 
 
 class MusicSourceResolver:
-    def __init__(self, *, max_playlist: int = 100):
+    def __init__(self, *, max_playlist: int = 100, spotify_workers: int = 6):
         self.max_playlist = max(1, min(int(max_playlist), 500))
+        self.spotify_workers = max(2, min(int(spotify_workers), 16))
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -153,7 +164,7 @@ class MusicSourceResolver:
             requester_name,
         )
 
-    async def resolve_stream(self, track: Track) -> StreamInfo:
+    async def resolve_stream(self, track: Track, *, attempt: int = 0) -> StreamInfo:
         if YoutubeDL is None:
             raise MusicSourceError("yt-dlp is not installed in the bot environment.")
 
@@ -165,7 +176,13 @@ class MusicSourceResolver:
                 track.duration,
             )
 
-        return await asyncio.to_thread(self._extract_stream, target, track)
+        format_selector = STREAM_FORMATS[min(max(attempt, 0), len(STREAM_FORMATS) - 1)]
+        return await asyncio.to_thread(
+            self._extract_stream,
+            target,
+            track,
+            format_selector,
+        )
 
     def _base_ytdlp_options(self) -> dict:
         options = {
@@ -230,6 +247,35 @@ class MusicSourceResolver:
         except Exception as exc:
             raise MusicSourceError(f"Spotify metadata could not start: {exc}") from exc
 
+    def _fetch_spotify_pages(self, fetch_page: Callable[[int], dict]) -> list[dict]:
+        """Fetch collection pages concurrently while preserving Spotify order."""
+        first_page = fetch_page(0)
+        first_items = list(first_page.get("items") or [])
+        if not first_items:
+            return []
+
+        page_size = max(1, int(first_page.get("limit") or len(first_items)))
+        total = min(int(first_page.get("total") or len(first_items)), self.max_playlist)
+        offsets = list(range(page_size, total, page_size))
+        pages: dict[int, list[dict]] = {0: first_items}
+
+        if offsets:
+            worker_count = min(self.spotify_workers, len(offsets))
+            with ThreadPoolExecutor(
+                max_workers=worker_count,
+                thread_name_prefix="spotify-import",
+            ) as executor:
+                futures = {executor.submit(fetch_page, offset): offset for offset in offsets}
+                for future in as_completed(futures):
+                    offset = futures[future]
+                    page = future.result()
+                    pages[offset] = list(page.get("items") or [])
+
+        ordered: list[dict] = []
+        for offset in (0, *offsets):
+            ordered.extend(pages.get(offset, []))
+        return ordered[: self.max_playlist]
+
     def _resolve_spotify(self, url: str, requester_id: int, requester_name: str) -> EnqueueResult:
         spotify = self._spotify_client()
         path_parts = [part for part in urlparse(url).path.split("/") if part]
@@ -237,41 +283,32 @@ class MusicSourceResolver:
             raise MusicSourceError("That Spotify link is incomplete.")
         kind = path_parts[0].lower()
 
+        collection_image: str | None = None
         try:
             if kind == "track":
                 raw_tracks = [spotify.track(url)]
                 collection_title = raw_tracks[0].get("name") or "Spotify track"
+                track_album = raw_tracks[0].get("album") or {}
+                track_images = track_album.get("images") or []
+                collection_image = track_images[0].get("url") if track_images else None
             elif kind == "album":
                 album = spotify.album(url)
-                raw_tracks = []
-                offset = 0
-                while len(raw_tracks) < self.max_playlist:
-                    page = spotify.album_tracks(url, limit=50, offset=offset)
-                    items = list(page.get("items") or [])
-                    if not items:
-                        break
-                    raw_tracks.extend(items)
-                    offset += len(items)
-                    total = int(page.get("total") or len(raw_tracks))
-                    if offset >= total:
-                        break
-                raw_tracks = raw_tracks[: self.max_playlist]
+                album_images = album.get("images") or []
+                collection_image = album_images[0].get("url") if album_images else None
+                raw_tracks = self._fetch_spotify_pages(
+                    lambda offset: spotify.album_tracks(url, limit=50, offset=offset)
+                )
                 collection_title = album.get("name") or "Spotify album"
             elif kind == "playlist":
                 playlist = spotify.playlist(url)
-                raw_tracks = []
-                offset = 0
-                while len(raw_tracks) < self.max_playlist:
-                    page = spotify.playlist_items(url, limit=50, offset=offset)
-                    items = list(page.get("items") or [])
-                    if not items:
-                        break
-                    raw_tracks.extend((item.get("track") or item.get("item") or item) for item in items)
-                    offset += len(items)
-                    total = int(page.get("total") or len(raw_tracks))
-                    if offset >= total:
-                        break
-                raw_tracks = raw_tracks[: self.max_playlist]
+                playlist_images = playlist.get("images") or []
+                collection_image = playlist_images[0].get("url") if playlist_images else None
+                playlist_items = self._fetch_spotify_pages(
+                    lambda offset: spotify.playlist_items(url, limit=50, offset=offset)
+                )
+                raw_tracks = [
+                    item.get("track") or item.get("item") or item for item in playlist_items
+                ]
                 collection_title = playlist.get("name") or "Spotify playlist"
             else:
                 raise MusicSourceError("Spotify track, album, and playlist links are supported.")
@@ -293,16 +330,21 @@ class MusicSourceResolver:
             track_url = external.get("spotify") or f"https://open.spotify.com/track/{raw.get('id', '')}"
             album = raw.get("album") or {}
             images = album.get("images") or []
+            track_image = images[0].get("url") if images else None
+            # A Spotify collection should keep its own cover in the control embed,
+            # even though yt-dlp later supplies the YouTube audio and thumbnail.
+            artwork = collection_image if kind in {"album", "playlist"} else track_image
             tracks.append(
                 Track(
-                    title=f"{artists} — {title}" if artists else title,
+                    title=title,
                     source_url=track_url,
                     webpage_url=track_url,
                     requester_id=requester_id,
                     requester_name=requester_name,
                     provider="Spotify → YouTube",
+                    artist=artists or None,
                     duration=int(raw["duration_ms"] / 1000) if raw.get("duration_ms") else None,
-                    thumbnail=images[0].get("url") if images else None,
+                    thumbnail=artwork or track_image or collection_image,
                     lookup_query=lookup,
                     original_url=track_url,
                 )
@@ -342,11 +384,11 @@ class MusicSourceResolver:
             raise MusicSourceError(f"The match for {query} had no playable URL.")
         return str(url)
 
-    def _extract_stream(self, target: str, track: Track) -> StreamInfo:
+    def _extract_stream(self, target: str, track: Track, format_selector: str) -> StreamInfo:
         options = self._base_ytdlp_options()
         options.update(
             {
-                "format": "bestaudio[acodec!=none]/bestaudio/best",
+                "format": format_selector,
                 "noplaylist": True,
             }
         )
@@ -359,12 +401,23 @@ class MusicSourceResolver:
             info = next((entry for entry in info["entries"] if entry), None)
         if not info or not info.get("url"):
             raise MusicSourceError("The provider returned no playable audio stream.")
+        uses_spotify_metadata = bool(track.lookup_query and track.provider.startswith("Spotify"))
         return StreamInfo(
             stream_url=str(info["url"]),
-            webpage_url=str(info.get("webpage_url") or target),
-            title=str(info.get("title") or track.title),
-            duration=int(info["duration"]) if info.get("duration") else track.duration,
-            thumbnail=info.get("thumbnail") or track.thumbnail,
+            webpage_url=(
+                track.webpage_url
+                if uses_spotify_metadata
+                else str(info.get("webpage_url") or target)
+            ),
+            title=track.title if uses_spotify_metadata else str(info.get("title") or track.title),
+            duration=(
+                track.duration
+                if uses_spotify_metadata
+                else (int(info["duration"]) if info.get("duration") else track.duration)
+            ),
+            thumbnail=(
+                track.thumbnail if uses_spotify_metadata else info.get("thumbnail") or track.thumbnail
+            ),
             user_agent=(info.get("http_headers") or {}).get("User-Agent"),
             referer=(info.get("http_headers") or {}).get("Referer"),
         )
