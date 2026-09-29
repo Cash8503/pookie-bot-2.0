@@ -5,6 +5,7 @@ import ipaddress
 import logging
 import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -54,26 +55,36 @@ STREAM_FORMATS = (
 )
 
 
-def discover_ffmpeg() -> str | None:
-    configured = os.getenv("FFMPEG_PATH", "").strip().strip('"')
-    if configured:
-        path = Path(configured).expanduser()
-        if path.is_file():
-            return str(path.resolve())
+def discover_ffmpeg_candidates() -> list[str]:
+    candidates: list[str] = []
 
-    executable = shutil.which("ffmpeg")
-    if executable:
-        return executable
+    def add_candidate(value: str | Path | None) -> None:
+        if not value:
+            return
+        path = Path(value).expanduser()
+        if not path.is_file():
+            return
+        resolved = str(path.resolve())
+        if os.path.normcase(resolved) not in {os.path.normcase(item) for item in candidates}:
+            candidates.append(resolved)
+
+    configured = os.getenv("FFMPEG_PATH", "").strip().strip('"')
+    add_candidate(configured)
+
+    add_candidate(shutil.which("ffmpeg"))
 
     try:
         import imageio_ffmpeg
 
-        bundled = Path(imageio_ffmpeg.get_ffmpeg_exe())
-        if bundled.is_file():
-            return str(bundled.resolve())
+        add_candidate(imageio_ffmpeg.get_ffmpeg_exe())
     except Exception:
         log.debug("Bundled FFmpeg discovery failed", exc_info=True)
-    return None
+    return candidates
+
+
+def discover_ffmpeg() -> str | None:
+    candidates = discover_ffmpeg_candidates()
+    return candidates[0] if candidates else None
 
 
 def _is_url(value: str) -> bool:
@@ -170,13 +181,23 @@ class MusicSourceResolver:
 
         target = track.source_url
         if track.lookup_query:
-            target = await asyncio.to_thread(
-                self._find_youtube_match,
-                track.lookup_query,
-                track.duration,
-            )
+            target = track.resolved_source_url
+            if not target:
+                target = await asyncio.to_thread(
+                    self._find_youtube_match,
+                    track.lookup_query,
+                    track.duration,
+                )
+                track.resolved_source_url = target
 
         format_selector = STREAM_FORMATS[min(max(attempt, 0), len(STREAM_FORMATS) - 1)]
+        if attempt > 0 and track.provider.startswith("Spotify"):
+            return await asyncio.to_thread(
+                self._download_stream,
+                target,
+                track,
+                format_selector,
+            )
         return await asyncio.to_thread(
             self._extract_stream,
             target,
@@ -188,6 +209,7 @@ class MusicSourceResolver:
         options = {
             "quiet": True,
             "no_warnings": True,
+            "noprogress": True,
             "skip_download": True,
             "socket_timeout": 20,
             "retries": 2,
@@ -421,3 +443,58 @@ class MusicSourceResolver:
             user_agent=(info.get("http_headers") or {}).get("User-Agent"),
             referer=(info.get("http_headers") or {}).get("Referer"),
         )
+
+    def _download_stream(self, target: str, track: Track, format_selector: str) -> StreamInfo:
+        """Buffer one Spotify match so FFmpeg does not handle remote HTTP input."""
+        temp_directory = Path(tempfile.mkdtemp(prefix="pookie-music-"))
+        options = self._base_ytdlp_options()
+        options.update(
+            {
+                "format": format_selector,
+                "noplaylist": True,
+                "skip_download": False,
+                "outtmpl": str(temp_directory / "audio.%(ext)s"),
+                "concurrent_fragment_downloads": 4,
+                "max_filesize": 128 * 1024 * 1024,
+            }
+        )
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(target, download=True)
+            if info and info.get("entries"):
+                info = next((entry for entry in info["entries"] if entry), None)
+            files = [
+                path
+                for path in temp_directory.iterdir()
+                if path.is_file() and not path.name.endswith((".part", ".ytdl"))
+            ]
+            if not info or not files:
+                raise MusicSourceError("The fallback audio could not be buffered.")
+            audio_path = max(files, key=lambda path: path.stat().st_size)
+            uses_spotify_metadata = track.provider.startswith("Spotify")
+            return StreamInfo(
+                stream_url=str(audio_path),
+                webpage_url=(
+                    track.webpage_url
+                    if uses_spotify_metadata
+                    else str(info.get("webpage_url") or target)
+                ),
+                title=track.title if uses_spotify_metadata else str(info.get("title") or track.title),
+                duration=(
+                    track.duration
+                    if uses_spotify_metadata
+                    else (int(info["duration"]) if info.get("duration") else track.duration)
+                ),
+                thumbnail=(
+                    track.thumbnail
+                    if uses_spotify_metadata
+                    else info.get("thumbnail") or track.thumbnail
+                ),
+                cleanup_path=str(temp_directory),
+            )
+        except DownloadError as exc:
+            shutil.rmtree(temp_directory, ignore_errors=True)
+            raise MusicSourceError(f"The fallback audio could not be downloaded: {exc}") from exc
+        except Exception:
+            shutil.rmtree(temp_directory, ignore_errors=True)
+            raise

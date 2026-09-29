@@ -16,6 +16,7 @@ class Track:
     thumbnail: str | None = None
     lookup_query: str | None = None
     original_url: str | None = None
+    resolved_source_url: str | None = None
 
     @property
     def display_title(self) -> str:
@@ -38,6 +39,7 @@ class StreamInfo:
     thumbnail: str | None = None
     user_agent: str | None = None
     referer: str | None = None
+    cleanup_path: str | None = None
 
 
 def format_duration(seconds: int | None) -> str:

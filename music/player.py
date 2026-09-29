@@ -5,15 +5,18 @@ import io
 import logging
 import random
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
+from pathlib import Path
 
 import discord
 
 from .models import Track
-from .sources import MusicSourceError, MusicSourceResolver
+from .sources import MusicSourceError, MusicSourceResolver, discover_ffmpeg_candidates
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +77,26 @@ def _ended_too_early(track: Track, elapsed: float) -> bool:
     return elapsed < minimum_expected
 
 
+def _remove_temporary_music_directory(raw_path: str) -> None:
+    """Remove only a temp directory created by the buffered music fallback."""
+    target = Path(raw_path).resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if target.parent != temp_root or not target.name.startswith("pookie-music-"):
+        log.error("Refusing to remove unexpected music temp path: %s", target)
+        return
+    for retry in range(10):
+        try:
+            shutil.rmtree(target)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if retry == 9:
+                log.warning("Could not remove buffered music file at %s", target, exc_info=True)
+                return
+            time.sleep(0.1)
+
+
 class MusicSession:
     def __init__(
         self,
@@ -92,6 +115,10 @@ class MusicSession:
         self.voice = voice
         self.resolver = resolver
         self.ffmpeg_path = ffmpeg_path
+        self.ffmpeg_paths = [ffmpeg_path]
+        for candidate in discover_ffmpeg_candidates():
+            if candidate not in self.ffmpeg_paths:
+                self.ffmpeg_paths.append(candidate)
         self.update_callback = update_callback
         self.error_callback = error_callback
         self.close_callback = close_callback
@@ -279,10 +306,15 @@ class MusicSession:
         self._playback_error = None
         self._track_done.clear()
 
-        stream = await asyncio.wait_for(
-            self.resolver.resolve_stream(track, attempt=attempt),
-            timeout=60,
-        )
+        if attempt == 0:
+            stream = await asyncio.wait_for(
+                self.resolver.resolve_stream(track, attempt=attempt),
+                timeout=60,
+            )
+        else:
+            # yt-dlp applies its own network timeouts. Do not cancel its worker
+            # thread mid-download and strand a partially buffered temp file.
+            stream = await self.resolver.resolve_stream(track, attempt=attempt)
         # Spotify remains authoritative for every display field. The YouTube
         # match contributes only its direct audio stream and transport headers.
         if not track.provider.startswith("Spotify"):
@@ -291,39 +323,50 @@ class MusicSession:
             track.duration = stream.duration or track.duration
             track.thumbnail = stream.thumbnail or track.thumbnail
 
-        before_options = (
-            "-nostdin -rw_timeout 15000000 -reconnect 1 "
-            "-reconnect_streamed 1 -reconnect_delay_max 5"
-        )
-        if stream.user_agent:
-            user_agent = stream.user_agent.replace('"', "").replace("\r", "").replace("\n", "")
-            before_options += f' -user_agent "{user_agent}"'
-        if stream.referer:
-            referer = stream.referer.replace('"', "").replace("\r", "").replace("\n", "")
-            before_options += f' -referer "{referer}"'
+        before_options = "-nostdin"
+        if not stream.cleanup_path:
+            before_options += (
+                " -rw_timeout 15000000 -reconnect 1 "
+                "-reconnect_streamed 1 -reconnect_delay_max 5"
+            )
+            if stream.user_agent:
+                user_agent = stream.user_agent.replace('"', "").replace("\r", "").replace("\n", "")
+                before_options += f' -user_agent "{user_agent}"'
+            if stream.referer:
+                referer = stream.referer.replace('"', "").replace("\r", "").replace("\n", "")
+                before_options += f' -referer "{referer}"'
 
-        audio = CheckedFFmpegPCMAudio(
-            stream.stream_url,
-            executable=self.ffmpeg_path,
-            before_options=before_options,
-            options="-vn -loglevel warning",
-        )
-        source = discord.PCMVolumeTransformer(audio, volume=self.volume)
+        ffmpeg_path = self.ffmpeg_paths[min(attempt, len(self.ffmpeg_paths) - 1)]
         try:
-            self.voice.play(source, after=self._after_playback)
-        except Exception:
-            source.cleanup()
-            raise
-        self.started_at = time.monotonic()
-        await self.notify_update()
-        await self._track_done.wait()
+            audio = CheckedFFmpegPCMAudio(
+                stream.stream_url,
+                executable=ffmpeg_path,
+                before_options=before_options,
+                options="-vn -loglevel warning",
+            )
+            source = discord.PCMVolumeTransformer(audio, volume=self.volume)
+            try:
+                self.voice.play(source, after=self._after_playback)
+            except Exception:
+                source.cleanup()
+                raise
+            self.started_at = time.monotonic()
+            await self.notify_update()
+            await self._track_done.wait()
 
-        elapsed = time.monotonic() - self.started_at
-        if self._playback_error:
-            return False, str(self._playback_error)
-        if _ended_too_early(track, elapsed):
-            return False, f"the audio stream ended after only {elapsed:.1f} seconds"
-        return True, None
+            elapsed = time.monotonic() - self.started_at
+            if self._playback_error:
+                return False, str(self._playback_error)
+            if _ended_too_early(track, elapsed):
+                return False, f"the audio stream ended after only {elapsed:.1f} seconds"
+            return True, None
+        finally:
+            if stream.cleanup_path:
+                await asyncio.sleep(0)
+                await asyncio.to_thread(
+                    _remove_temporary_music_directory,
+                    stream.cleanup_path,
+                )
 
     async def _player_loop(self) -> None:
         try:
@@ -375,7 +418,7 @@ class MusicSession:
                         self.started_at = None
                         await self.notify_error(
                             f"Playback failed for **{track.display_title}**; "
-                            "retrying with an alternate audio format."
+                            "buffering a local fallback and retrying."
                         )
 
                 if not completed and not self.closed and not self._discard_current:

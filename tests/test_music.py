@@ -1,19 +1,27 @@
 import asyncio
 import io
 import threading
+from pathlib import Path
 
 import discord
 import pytest
 
 import music.sources as music_sources
-from music.models import Track
+from music.models import StreamInfo, Track
 from music.player import (
     CheckedFFmpegPCMAudio,
     FFmpegPlaybackError,
     MusicSession,
     _ended_too_early,
+    _remove_temporary_music_directory,
 )
-from music.sources import STREAM_FORMATS, MusicSourceError, MusicSourceResolver, discover_ffmpeg
+from music.sources import (
+    STREAM_FORMATS,
+    MusicSourceError,
+    MusicSourceResolver,
+    discover_ffmpeg,
+    discover_ffmpeg_candidates,
+)
 
 
 class FakeVoice:
@@ -121,6 +129,7 @@ async def test_private_and_unknown_media_hosts_are_rejected():
 
 def test_ffmpeg_is_available_from_path_or_bundled_dependency():
     assert discover_ffmpeg()
+    assert discover_ffmpeg_candidates()[0] == discover_ffmpeg()
 
 
 def test_spotify_playlist_tracks_keep_the_playlist_cover():
@@ -230,6 +239,95 @@ def test_spotify_stream_resolution_ignores_youtube_display_metadata(monkeypatch)
     assert stream.title == track.title
     assert stream.duration == track.duration
     assert stream.thumbnail == track.thumbnail
+
+
+def test_buffered_fallback_downloads_audio_and_preserves_spotify_metadata(monkeypatch):
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def extract_info(self, target, *, download):
+            assert download is True
+            output = Path(self.options["outtmpl"].replace("%(ext)s", "webm"))
+            output.write_bytes(b"buffered audio")
+            return {
+                "webpage_url": "https://youtube.com/watch?v=matched",
+                "title": "Wrong YouTube Title",
+                "duration": 999,
+                "thumbnail": "https://youtube.example/thumbnail.jpg",
+            }
+
+    monkeypatch.setattr(music_sources, "YoutubeDL", FakeYoutubeDL)
+    track = Track(
+        title="Spotify Title",
+        artist="Spotify Artist",
+        source_url="https://open.spotify.com/track/track-1",
+        webpage_url="https://open.spotify.com/track/track-1",
+        requester_id=1,
+        requester_name="Tester",
+        provider="Spotify → YouTube",
+        duration=180,
+        thumbnail="https://i.scdn.co/spotify-cover.jpg",
+        lookup_query="Spotify Artist - Spotify Title official audio",
+    )
+
+    stream = MusicSourceResolver()._download_stream(
+        "https://youtube.com/watch?v=matched",
+        track,
+        STREAM_FORMATS[1],
+    )
+    try:
+        assert Path(stream.stream_url).read_bytes() == b"buffered audio"
+        assert stream.cleanup_path
+        assert stream.title == track.title
+        assert stream.webpage_url == track.webpage_url
+        assert stream.duration == track.duration
+        assert stream.thumbnail == track.thumbnail
+    finally:
+        _remove_temporary_music_directory(stream.cleanup_path)
+    assert not Path(stream.cleanup_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_spotify_retry_reuses_the_same_youtube_match(monkeypatch):
+    resolver = MusicSourceResolver()
+    lookups = []
+    track = Track(
+        title="Spotify Title",
+        artist="Spotify Artist",
+        source_url="https://open.spotify.com/track/track-1",
+        webpage_url="https://open.spotify.com/track/track-1",
+        requester_id=1,
+        requester_name="Tester",
+        provider="Spotify → YouTube",
+        duration=180,
+        lookup_query="Spotify Artist - Spotify Title official audio",
+    )
+    stream = StreamInfo(
+        stream_url="https://audio.example/direct",
+        webpage_url=track.webpage_url,
+        title=track.title,
+    )
+
+    def find_match(query, duration):
+        lookups.append((query, duration))
+        return "https://youtube.com/watch?v=matched"
+
+    monkeypatch.setattr(resolver, "_find_youtube_match", find_match)
+    monkeypatch.setattr(resolver, "_extract_stream", lambda *args: stream)
+    monkeypatch.setattr(resolver, "_download_stream", lambda *args: stream)
+
+    await resolver.resolve_stream(track, attempt=0)
+    await resolver.resolve_stream(track, attempt=1)
+
+    assert len(lookups) == 1
+    assert track.resolved_source_url == "https://youtube.com/watch?v=matched"
 
 
 def test_retry_switches_from_m4a_to_webm():
